@@ -1,0 +1,50 @@
+name: Verify ReproGate
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 11.21.0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+          cache-dependency-path: web/pnpm-lock.yaml
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: wasm32v1-none
+      - name: Install Stellar CLI
+        run: cargo install --locked stellar-cli --version 27.0.0
+      - name: Install web dependencies
+        working-directory: web
+        run: pnpm install --frozen-lockfile
+      - name: Lint
+        working-directory: web
+        run: pnpm lint
+      - name: TypeScript
+        working-directory: web
+        run: pnpm typecheck
+      - name: Frontend and domain tests
+        working-directory: web
+        run: pnpm test
+      - name: Next.js production build
+        working-directory: web
+        run: pnpm build
+        env:
+          NEXT_PUBLIC_STELLAR_NETWORK: testnet
+          NEXT_PUBLIC_REPRO_REGISTRY_CONTRACT_ID: CALM3YEN53GE6EGQLQKKM6VDAQJMXKETV4G4PFXQCVBNIY4QOSZ3C44E
+          NEXT_PUBLIC_REWARD_VAULT_CONTRACT_ID: CAVYV2XJP7JEMRHX6EG3NVCDCIMJYKKKJ4JXZ62HESIATPQYKLMNZNFQ
+      - name: Rust contract tests
+        working-directory: contracts
+        run: cargo test --workspace
+      - name: Soroban contract build
+        working-directory: contracts
+        run: stellar contract build
