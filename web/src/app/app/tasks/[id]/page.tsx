@@ -1,0 +1,27 @@
+import { connection } from "next/server";
+import { notFound } from "next/navigation";
+import { getTask } from "@/lib/server/repository";
+import { formatXlm } from "@/lib/stellar/amounts";
+import { stellarConfig } from "@/lib/stellar/config";
+import { StatusBadge } from "@/components/status-badge";
+import { TaskChainActions } from "@/features/tasks/task-chain-actions";
+import { SubmissionForm } from "@/features/submissions/submission-form";
+import { PollingRefresh } from "@/features/tasks/polling-refresh";
+import { ReportPanel } from "@/features/tasks/report-panel";
+
+export default async function TaskDetailPage({ params }: { params: Promise<{ id: string }> }) {
+  await connection(); const { id } = await params;
+  const task = await getTask(id); if (!task) notFound();
+  const chainConfigured = Boolean(stellarConfig.registryContractId && stellarConfig.vaultContractId);
+  return <><PollingRefresh enabled={chainConfigured} /><div className="page-heading"><div><p className="task-card-repo">{task.githubIssue.owner}/{task.githubIssue.repo} #{task.githubIssue.number}</p><h1>{task.githubIssue.title}</h1><p>{task.objective}</p></div><StatusBadge status={task.status} /></div>
+    <div className="detail-grid"><div className="detail-main">
+      {!chainConfigured ? <p className="notice notice-warning">Contract IDs are not configured. The draft can be inspected, but funding requires a local or Testnet deployment.</p> : null}
+      <section className="panel stack"><a className="issue-link" href={task.githubIssue.url} target="_blank" rel="noreferrer">Open original GitHub issue ↗</a><h2>Issue context</h2><p className="prose">{task.githubIssue.body || "The issue has no body."}</p></section>
+      <section className="panel stack"><div><p className="eyebrow">Reproduction brief</p><h2>{task.targetEnvironment}</h2></div><p className="prose">{task.objective}</p>{task.reproductionNotes ? <p className="notice notice-info">{task.reproductionNotes}</p> : null}</section>
+      {task.verification ? <section className="panel stack"><div><p className="eyebrow">Confirmation engine</p><h2>{task.verification.classification.replaceAll("_", " ")}</h2><p className="muted">{task.verification.explanation}</p></div><div className="verification-groups">{task.verification.groups.map((group) => <div className="verification-group" key={group.key}><span><strong>{group.verdict}</strong><br /><code>{group.environment.runtime} {group.environment.runtimeVersion} · {group.environment.operatingSystem}</code></span><strong>{group.count}/{task.threshold}</strong></div>)}</div><p className="mono field-hint">result hash: {task.verification.resultHash}</p></section> : null}
+      <section className="panel stack"><div><p className="eyebrow">Independent submissions</p><h2>{task.submissions.length} evidence package{task.submissions.length === 1 ? "" : "s"}</h2></div>{task.submissions.length ? task.submissions.map((submission) => <article className={`submission-card ${submission.eligible ? "" : "flagged"}`} key={submission.id}><div className="submission-header"><span className={`verdict ${submission.verdict === "REPRODUCED" ? "reproduced" : "not-reproduced"}`}>{submission.verdict.replaceAll("_", " ")}</span><span className="mono field-hint">{submission.wallet.slice(0, 6)}…{submission.wallet.slice(-6)}</span></div><h3>{submission.environment.runtime} {submission.environment.runtimeVersion} on {submission.environment.operatingSystem}</h3><p className="environment-line">{submission.environment.packageManager}@{submission.environment.packageManagerVersion}</p>{submission.suspiciousReason ? <p className="notice notice-warning">Excluded from threshold: {submission.suspiciousReason}</p> : null}</article>) : <p className="muted">No evidence has been submitted yet.</p>}</section>
+      {(task.status === "OPEN" || task.status === "VERIFYING") ? <SubmissionForm taskId={task.id} /> : null}
+      {task.status === "VERIFIED" ? <ReportPanel taskId={task.id} maintainerWallet={task.maintainerWallet} existingUrl={task.githubReportUrl} /> : null}
+    </div><aside className="detail-sidebar"><section className="panel stack"><div><p className="eyebrow">Reward contract</p><h2>{formatXlm(task.rewardStroops)} XLM</h2></div><dl className="key-value"><div><dt>Threshold</dt><dd>{task.threshold}</dd></div><div><dt>Eligible submissions</dt><dd>{task.submissions.filter((item) => item.eligible).length}</dd></div><div><dt>Deadline</dt><dd>{new Intl.DateTimeFormat("en", { dateStyle: "medium", timeStyle: "short" }).format(new Date(task.deadline))}</dd></div><div><dt>Maintainer</dt><dd className="mono">{task.maintainerWallet.slice(0, 7)}…{task.maintainerWallet.slice(-7)}</dd></div></dl><TaskChainActions task={task} /></section>
+      <section className="panel stack"><p className="eyebrow">On-chain evidence</p>{task.vaultFundingTx ? <a className="transaction-link" target="_blank" rel="noreferrer" href={`${stellarConfig.explorerUrl}/tx/${task.vaultFundingTx}`}>Funding · {task.vaultFundingTx}</a> : <p className="muted">Reward not confirmed.</p>}{task.registryTx ? <a className="transaction-link" target="_blank" rel="noreferrer" href={`${stellarConfig.explorerUrl}/tx/${task.registryTx}`}>Registry · {task.registryTx}</a> : null}{task.finalizationTx ? <a className="transaction-link" target="_blank" rel="noreferrer" href={`${stellarConfig.explorerUrl}/tx/${task.finalizationTx}`}>Final state · {task.finalizationTx}</a> : null}</section></aside></div></>;
+}
