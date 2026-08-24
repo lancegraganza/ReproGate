@@ -1,0 +1,32 @@
+# Tasks
+
+## Research and foundation
+
+- [x] Validate Stellar CLI 27, soroban-sdk 27, native SAC, RPC, bindings, and Wallets Kit v2
+- [x] Finalize architecture, trust boundaries, and decisions
+- [x] Next.js 16, TypeScript, Tailwind, lint, tests, and production build
+- [x] Environment validation, Mainnet rejection, and generated clients
+- [x] Multi-wallet, balance, transfer, transaction state, and error handling
+
+## Complete product
+
+- [x] GitHub issue import and wallet-authenticated task creation
+- [x] Native XLM funding, registry creation, and event reconciliation
+- [x] Structured evidence, normalization, one-wallet rule, and copy exclusion
+- [x] Threshold, conflicting, and environment-specific classification
+- [x] Atomic payout, replay prevention, expiration, and refund
+- [x] Final report preview and maintainer-authorized posting
+- [x] Responsive app, history, submissions, task, create, and wallet routes
+
+## Verification and release
+
+- [x] Contract tests/build
+- [x] Web lint/typecheck/tests/build
+- [x] Critical validation and wallet ownership proof
+- [x] Desktop/mobile browser verification
+- [ ] Local Quickstart — blocked by missing Docker on the current machine
+- [x] Testnet deployment and full application smoke
+- [x] GitHub Actions and public evidence
+- [ ] Vercel — requires authenticated Vercel and durable libSQL credentials
+- [ ] Live GitHub comment — requires repository-scoped `GITHUB_TOKEN`; preview verified
+
