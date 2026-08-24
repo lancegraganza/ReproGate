@@ -9,6 +9,7 @@ const DAY_IN_LEDGERS: u32 = 17_280;
 const BUMP_THRESHOLD: u32 = 30 * DAY_IN_LEDGERS;
 const BUMP_TO: u32 = 120 * DAY_IN_LEDGERS;
 const MAX_CONTRIBUTORS: u32 = 5;
+const MAX_DEADLINE_SECONDS: u64 = 90 * 24 * 60 * 60;
 
 #[contracttype]
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -24,6 +25,7 @@ pub struct Reward {
     pub maintainer: Address,
     pub amount: i128,
     pub deadline: u64,
+    pub registered: bool,
     pub state: RewardState,
 }
 
@@ -53,6 +55,9 @@ pub enum VaultError {
     AlreadyPaid = 10,
     DeadlinePassed = 11,
     DeadlineNotReached = 12,
+    DeadlineTooFar = 13,
+    AlreadyRegistered = 14,
+    NotRegistered = 15,
 }
 
 #[contractevent]
@@ -63,6 +68,12 @@ pub struct RewardFunded {
     pub maintainer: Address,
     pub amount: i128,
     pub deadline: u64,
+}
+
+#[contractevent]
+pub struct RewardRegistered {
+    #[topic]
+    pub task_id: BytesN<32>,
 }
 
 #[contractevent]
@@ -136,8 +147,12 @@ impl RewardVault {
         if amount <= 0 {
             return Err(VaultError::InvalidAmount);
         }
-        if deadline <= env.ledger().timestamp() {
+        let now = env.ledger().timestamp();
+        if deadline <= now {
             return Err(VaultError::InvalidDeadline);
+        }
+        if deadline - now > MAX_DEADLINE_SECONDS {
+            return Err(VaultError::DeadlineTooFar);
         }
         let key = DataKey::Reward(task_id.clone());
         if env.storage().persistent().has(&key) {
@@ -152,6 +167,7 @@ impl RewardVault {
             maintainer: maintainer.clone(),
             amount,
             deadline,
+            registered: false,
             state: RewardState::Funded,
         };
         env.storage().persistent().set(&key, &reward);
@@ -163,6 +179,36 @@ impl RewardVault {
             deadline,
         }
         .publish(&env);
+        Ok(())
+    }
+
+    pub fn activate(env: Env, task_id: BytesN<32>) -> Result<(), VaultError> {
+        let registry: Address = env
+            .storage()
+            .instance()
+            .get(&DataKey::Registry)
+            .ok_or(VaultError::NotConfigured)?;
+        registry.require_auth();
+        bump_instance(&env);
+        let key = DataKey::Reward(task_id.clone());
+        let mut reward: Reward = env
+            .storage()
+            .persistent()
+            .get(&key)
+            .ok_or(VaultError::RewardNotFound)?;
+        if reward.state != RewardState::Funded {
+            return Err(VaultError::RewardNotFunded);
+        }
+        if reward.registered {
+            return Err(VaultError::AlreadyRegistered);
+        }
+        if env.ledger().timestamp() > reward.deadline {
+            return Err(VaultError::DeadlinePassed);
+        }
+        reward.registered = true;
+        env.storage().persistent().set(&key, &reward);
+        bump_reward(&env, &key);
+        RewardRegistered { task_id }.publish(&env);
         Ok(())
     }
 
@@ -187,6 +233,9 @@ impl RewardVault {
             .ok_or(VaultError::RewardNotFound)?;
         if reward.state != RewardState::Funded {
             return Err(VaultError::RewardNotFunded);
+        }
+        if !reward.registered {
+            return Err(VaultError::NotRegistered);
         }
         if env.ledger().timestamp() > reward.deadline {
             return Err(VaultError::DeadlinePassed);
@@ -264,6 +313,9 @@ impl RewardVault {
         if reward.state != RewardState::Funded {
             return Err(VaultError::RewardNotFunded);
         }
+        if !reward.registered {
+            return Err(VaultError::NotRegistered);
+        }
         if env.ledger().timestamp() <= reward.deadline {
             return Err(VaultError::DeadlineNotReached);
         }
@@ -285,6 +337,26 @@ impl RewardVault {
         }
         .publish(&env);
         Ok(())
+    }
+
+    pub fn refund_unregistered(env: Env, task_id: BytesN<32>) -> Result<(), VaultError> {
+        let key = DataKey::Reward(task_id.clone());
+        let reward: Reward = env
+            .storage()
+            .persistent()
+            .get(&key)
+            .ok_or(VaultError::RewardNotFound)?;
+        reward.maintainer.require_auth();
+        if reward.state != RewardState::Funded {
+            return Err(VaultError::RewardNotFunded);
+        }
+        if reward.registered {
+            return Err(VaultError::AlreadyRegistered);
+        }
+        if env.ledger().timestamp() <= reward.deadline {
+            return Err(VaultError::DeadlineNotReached);
+        }
+        refund_reward(&env, task_id, key, reward)
     }
 
     pub fn get_reward(env: Env, task_id: BytesN<32>) -> Result<Reward, VaultError> {
@@ -333,6 +405,26 @@ fn bump_reward(env: &Env, key: &DataKey) {
     env.storage()
         .persistent()
         .extend_ttl(key, BUMP_THRESHOLD, BUMP_TO);
+}
+
+fn refund_reward(
+    env: &Env,
+    task_id: BytesN<32>,
+    key: DataKey,
+    mut reward: Reward,
+) -> Result<(), VaultError> {
+    reward.state = RewardState::Refunded;
+    env.storage().persistent().set(&key, &reward);
+    let destination = MuxedAddress::from(reward.maintainer.clone());
+    token_client(env)?.transfer(&env.current_contract_address(), &destination, &reward.amount);
+    bump_reward(env, &key);
+    RewardRefunded {
+        task_id,
+        maintainer: reward.maintainer,
+        amount: reward.amount,
+    }
+    .publish(env);
+    Ok(())
 }
 
 #[cfg(test)]

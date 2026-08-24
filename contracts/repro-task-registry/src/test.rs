@@ -79,6 +79,7 @@ fn registers_only_matching_funded_task() {
     f.registry()
         .register_task(&task_id, &f.maintainer, &500, &2, &2_000);
     assert_eq!(f.registry().get_task(&task_id).state, TaskState::Open);
+    assert!(f.vault().get_reward(&task_id).registered);
 }
 
 #[test]
@@ -96,6 +97,20 @@ fn rejects_invalid_thresholds_and_unfunded_tasks() {
     assert!(f
         .registry()
         .try_register_task(&task_id, &f.maintainer, &100, &2, &2_000)
+        .is_err());
+
+    let underfunded = id(&f.env, 8);
+    f.vault().lock(&underfunded, &f.maintainer, &1, &2_000);
+    assert!(f
+        .registry()
+        .try_register_task(&underfunded, &f.maintainer, &1, &2, &2_000)
+        .is_err());
+
+    let too_long = id(&f.env, 9);
+    let deadline = 1_000 + MAX_DEADLINE_SECONDS + 1;
+    assert!(f
+        .vault()
+        .try_lock(&too_long, &f.maintainer, &100, &deadline)
         .is_err());
 }
 

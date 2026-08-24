@@ -10,6 +10,7 @@ const BUMP_THRESHOLD: u32 = 30 * DAY_IN_LEDGERS;
 const BUMP_TO: u32 = 120 * DAY_IN_LEDGERS;
 const MIN_THRESHOLD: u32 = 2;
 const MAX_THRESHOLD: u32 = 5;
+const MAX_DEADLINE_SECONDS: u64 = 90 * 24 * 60 * 60;
 
 #[contracttype]
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -44,12 +45,14 @@ pub struct VaultReward {
     pub maintainer: Address,
     pub amount: i128,
     pub deadline: u64,
+    pub registered: bool,
     pub state: VaultRewardState,
 }
 
 #[contractclient(name = "RewardVaultClient")]
 pub trait RewardVaultInterface {
     fn get_reward(env: Env, task_id: BytesN<32>) -> Result<VaultReward, RegistryError>;
+    fn activate(env: Env, task_id: BytesN<32>) -> Result<(), RegistryError>;
     fn distribute(
         env: Env,
         task_id: BytesN<32>,
@@ -85,6 +88,7 @@ pub enum RegistryError {
     DuplicateContributor = 13,
     InvalidResultHash = 14,
     VaultFailure = 15,
+    DeadlineTooFar = 16,
 }
 
 #[contractevent]
@@ -162,11 +166,15 @@ impl ReproTaskRegistry {
         if threshold < MIN_THRESHOLD || threshold > MAX_THRESHOLD {
             return Err(RegistryError::InvalidThreshold);
         }
-        if reward_amount <= 0 {
+        if reward_amount <= 0 || reward_amount < threshold as i128 {
             return Err(RegistryError::InvalidReward);
         }
-        if deadline <= env.ledger().timestamp() {
+        let now = env.ledger().timestamp();
+        if deadline <= now {
             return Err(RegistryError::InvalidDeadline);
+        }
+        if deadline - now > MAX_DEADLINE_SECONDS {
+            return Err(RegistryError::DeadlineTooFar);
         }
         let key = DataKey::Task(task_id.clone());
         if env.storage().persistent().has(&key) {
@@ -177,11 +185,13 @@ impl ReproTaskRegistry {
         if reward.maintainer != maintainer
             || reward.amount != reward_amount
             || reward.deadline != deadline
+            || reward.registered
             || reward.state != VaultRewardState::Funded
         {
             return Err(RegistryError::FundingMismatch);
         }
 
+        vault_client(&env)?.activate(&task_id);
         let task = Task {
             maintainer: maintainer.clone(),
             reward_amount,

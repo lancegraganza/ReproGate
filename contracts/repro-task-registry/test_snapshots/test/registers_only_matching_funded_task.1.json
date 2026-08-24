@@ -168,6 +168,7 @@
         }
       ]
     ],
+    [],
     []
   ],
   "ledger": {
@@ -489,6 +490,14 @@
                     },
                     "val": {
                       "address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAFCT4"
+                    }
+                  },
+                  {
+                    "key": {
+                      "symbol": "registered"
+                    },
+                    "val": {
+                      "bool": true
                     }
                   },
                   {

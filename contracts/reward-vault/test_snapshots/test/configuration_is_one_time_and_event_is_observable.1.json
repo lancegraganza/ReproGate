@@ -275,6 +275,14 @@
                   },
                   {
                     "key": {
+                      "symbol": "registered"
+                    },
+                    "val": {
+                      "bool": false
+                    }
+                  },
+                  {
+                    "key": {
                       "symbol": "state"
                     },
                     "val": {

@@ -49,6 +49,11 @@ fn fixture() -> Fixture {
     }
 }
 
+fn lock_and_activate(f: &Fixture, id: &BytesN<32>, amount: i128, deadline: u64) {
+    f.client().lock(id, &f.maintainer, &amount, &deadline);
+    f.client().activate(id);
+}
+
 #[test]
 fn lock_stores_funded_reward_and_emits_event() {
     let f = fixture();
@@ -58,6 +63,7 @@ fn lock_stores_funded_reward_and_emits_event() {
     let reward = f.client().get_reward(&id);
     assert_eq!(reward.amount, 500_000);
     assert_eq!(reward.maintainer, f.maintainer);
+    assert!(!reward.registered);
     assert_eq!(reward.state, RewardState::Funded);
     assert_eq!(f.token().balance(&f.vault_id), 500_000);
 }
@@ -69,7 +75,7 @@ fn distribution_splits_remainder_and_prevents_replay() {
     let a = Address::generate(&f.env);
     let b = Address::generate(&f.env);
     let c = Address::generate(&f.env);
-    f.client().lock(&id, &f.maintainer, &10, &2_000);
+    lock_and_activate(&f, &id, 10, 2_000);
     f.client().distribute(
         &id,
         &soroban_sdk::vec![&f.env, a.clone(), b.clone(), c.clone()],
@@ -90,7 +96,7 @@ fn distribution_splits_remainder_and_prevents_replay() {
 fn refund_only_after_deadline_and_is_exclusive_with_payout() {
     let f = fixture();
     let id = BytesN::from_array(&f.env, &[3; 32]);
-    f.client().lock(&id, &f.maintainer, &100, &2_000);
+    lock_and_activate(&f, &id, 100, 2_000);
     assert!(f.client().try_refund(&id).is_err());
 
     f.env.ledger().set_timestamp(2_001);
@@ -108,7 +114,7 @@ fn duplicate_contributors_are_rejected_atomically() {
     let f = fixture();
     let id = BytesN::from_array(&f.env, &[4; 32]);
     let contributor = Address::generate(&f.env);
-    f.client().lock(&id, &f.maintainer, &100, &2_000);
+    lock_and_activate(&f, &id, 100, 2_000);
     let contributors = soroban_sdk::vec![&f.env, contributor.clone(), contributor];
     assert!(f.client().try_distribute(&id, &contributors).is_err());
     assert_eq!(f.client().get_reward(&id).state, RewardState::Funded);
@@ -123,6 +129,35 @@ fn invalid_amount_and_deadline_are_rejected() {
         .client()
         .try_lock(&id, &f.maintainer, &100, &1_000)
         .is_err());
+    assert!(f
+        .client()
+        .try_lock(
+            &BytesN::from_array(&f.env, &[8; 32]),
+            &f.maintainer,
+            &100,
+            &(1_000 + MAX_DEADLINE_SECONDS + 1),
+        )
+        .is_err());
+}
+
+#[test]
+fn expired_unregistered_reward_is_recoverable_only_by_maintainer() {
+    let f = fixture();
+    let id = BytesN::from_array(&f.env, &[9; 32]);
+    f.client().lock(&id, &f.maintainer, &100, &2_000);
+    f.env.ledger().set_timestamp(2_001);
+    f.client().refund_unregistered(&id);
+    assert_eq!(f.client().get_reward(&id).state, RewardState::Refunded);
+    assert_eq!(f.token().balance(&f.vault_id), 0);
+}
+
+#[test]
+fn registered_reward_cannot_use_unregistered_recovery() {
+    let f = fixture();
+    let id = BytesN::from_array(&f.env, &[10; 32]);
+    lock_and_activate(&f, &id, 100, 2_000);
+    f.env.ledger().set_timestamp(2_001);
+    assert!(f.client().try_refund_unregistered(&id).is_err());
 }
 
 #[test]

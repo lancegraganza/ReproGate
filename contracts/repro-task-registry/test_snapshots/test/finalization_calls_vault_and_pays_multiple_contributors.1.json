@@ -609,6 +609,14 @@
                   },
                   {
                     "key": {
+                      "symbol": "registered"
+                    },
+                    "val": {
+                      "bool": true
+                    }
+                  },
+                  {
+                    "key": {
                       "symbol": "state"
                     },
                     "val": {
