@@ -338,29 +338,78 @@ function randomItem<T>(items: readonly T[]): T {
   return items[randomInt(items.length)]!;
 }
 
+type EmailParts = {
+  first: string;
+  middle?: string;
+  family: string;
+  word: string;
+  secondWord: string;
+};
+
+type EmailStyle = (parts: EmailParts) => string;
+
+function randomSeparator(): "" | "." | "_" {
+  return randomItem(["", "", "", "", ".", ".", "_", "_"] as const);
+}
+
+const emailStyles: readonly EmailStyle[] = [
+  ({ first, family }) => `${first}${family}`,
+  ({ first, word }) => `${first}${randomSeparator()}${word}`,
+  ({ word, first }) => `${word}${randomSeparator()}${first}`,
+  ({ family, first }) => `${family}${first.slice(0, 1)}`,
+  ({ family, first }) => `${family}${randomSeparator()}${first}`,
+  ({ first, middle, family, word }) => `${first}${middle ?? word}${family}`,
+  ({ first, family, word }) => `${first}${randomSeparator()}${family.slice(0, 1)}${word}`,
+  ({ word, family }) => `${word}${randomSeparator()}${family}`,
+  ({ first, family, secondWord }) => `${first}${secondWord}${randomSeparator()}${family.slice(0, 1)}`,
+  ({ first, family, secondWord }) => `${first}${randomSeparator()}${family}${randomSeparator()}${secondWord}`,
+  ({ first, family, word }) => `${first.slice(0, 1)}${randomSeparator()}${family}${randomSeparator()}${word}`,
+  ({ first, middle, secondWord }) => `${first}${randomSeparator()}${middle ?? secondWord}`,
+  ({ family, word, first }) => `${family}${randomSeparator()}${word}${first.slice(0, 1)}`,
+  ({ secondWord, first, family }) => `${secondWord}${randomSeparator()}${first}${family.slice(0, 1)}`,
+  ({ first, middle, family, word }) => `${first.slice(0, 1)}${middle?.slice(0, 1) ?? ""}${randomSeparator()}${family}${word}`,
+  ({ word, first, family }) => `${word}${randomSeparator()}${first}${randomSeparator()}${family}`,
+  ({ first, word, family }) => `${first}${randomSeparator()}${word}${family}`,
+  ({ family, first, secondWord }) => `${family}${first}${randomSeparator()}${secondWord}`,
+];
+
+const recentEmailStyles: number[] = [];
+const recentEmailLocals: string[] = [];
+
+function chooseEmailStyle(): EmailStyle {
+  const available = emailStyles
+    .map((_, index) => index)
+    .filter((index) => !recentEmailStyles.includes(index));
+  const index = randomItem(available.length ? available : emailStyles.map((_, i) => i));
+  recentEmailStyles.push(index);
+  if (recentEmailStyles.length > 8) recentEmailStyles.shift();
+  return emailStyles[index]!;
+}
+
 function randomizedEmail(firstName: string, surname: string): string {
   const nameParts = firstName.split(/\s+/).map(cleanUsernamePart).filter(Boolean);
   const first = nameParts[0] ?? "mika";
   const middle = nameParts[1];
   const family = cleanUsernamePart(surname) || "dalisay";
-  const word = randomItem(usernameWords);
-  const patterns = [
-    [first, family],
-    [first, middle ?? word],
-    [family, first.slice(0, 1)],
-    [first, word],
-    [word, first],
-    [first.slice(0, 1), family],
-    [`${first}${middle ?? ""}`, word],
-    [family, word],
-    [first.slice(0, 4), family.slice(0, 5)],
-    [`${first}${family.slice(0, 1)}`, word],
-  ];
-  const separator = randomItem(["", "", "", ".", "_"] as const);
-  let localPart = randomItem(patterns).join(separator);
-  if (randomInt(100) < 32) {
+  let localPart = "";
+  for (let attempt = 0; attempt < 10; attempt += 1) {
+    const word = randomItem(usernameWords);
+    let secondWord = randomItem(usernameWords);
+    while (secondWord === word) secondWord = randomItem(usernameWords);
+    localPart = chooseEmailStyle()({
+      first,
+      middle,
+      family,
+      word,
+      secondWord,
+    });
+    if (!recentEmailLocals.includes(localPart)) break;
+  }
+  if (randomInt(100) < 28) {
     localPart += String(randomInt(2, 100));
   }
+  recentEmailLocals.push(localPart);
+  if (recentEmailLocals.length > 64) recentEmailLocals.shift();
   return `${localPart}@gmail.com`;
 }
 
