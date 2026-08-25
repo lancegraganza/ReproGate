@@ -32,4 +32,4 @@
 - [x] 30-minute Gemini/Testnet/Google Form reproduction cron implementation
 - [x] cron-job.org scheduler instructions with bearer-header protection
 - [x] Read-only wallet interaction report with unique Stellar address counts
-- [ ] Live automated cron run — requires a cron-job.org account/job plus `GEMINI_API_KEY`, `CRON_SECRET`, and production durable database credentials
+- [x] Live automated cron run — verified a completed cron-job.org Testnet/Gemini/Google Form run with production durable database credentials
