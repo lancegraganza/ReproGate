@@ -5,7 +5,8 @@ import { rpc, scValToNative, TransactionBuilder } from "@stellar/stellar-sdk";
 import { Client as RegistryClient } from "./generated/repro-task-registry/src";
 import { Client as VaultClient } from "./generated/reward-vault/src";
 import type { ReproTask } from "@/types/domain";
-import { requireContractIds, stellarConfig } from "./config";
+import { explorerTransactionUrl, requireContractIds, stellarConfig } from "./config";
+import { getTask, recordTaskTransaction } from "@/lib/server/repository";
 
 function taskIdBuffer(task: ReproTask): Buffer {
   return Buffer.from(task.taskHash, "hex");
@@ -319,3 +320,136 @@ export async function verifyRewardPayouts(
     throw new Error("Reward Vault completion events do not match the expected payout.");
   }
 }
+
+export async function reconcileTaskWithChain(taskId: string): Promise<ReproTask> {
+  const task = await getTask(taskId);
+  if (!task) throw new Error("Task not found.");
+  if (!stellarConfig.registryContractId || !stellarConfig.vaultContractId) {
+    return task;
+  }
+  const ids = requireContractIds();
+
+  // 1. Check Reward Vault
+  let onChainReward:
+    | {
+        state: { tag: string };
+        maintainer: string;
+        amount: bigint;
+        deadline: bigint;
+        registered: boolean;
+      }
+    | undefined;
+  try {
+    const vaultClient = new VaultClient({
+      contractId: ids.vault,
+      rpcUrl: stellarConfig.rpcUrl,
+      networkPassphrase: stellarConfig.networkPassphrase,
+    });
+    const res = await vaultClient.get_reward({ task_id: taskIdBuffer(task) });
+    if (res.result && typeof res.result.unwrap === "function") {
+      try {
+        onChainReward = res.result.unwrap();
+      } catch {
+        // Not found or error
+      }
+    }
+  } catch {
+    // Reward not found in vault
+  }
+
+  // 2. Check Task Registry
+  let onChainTask:
+    | {
+        state: { tag: string };
+        maintainer: string;
+        reward_amount: bigint;
+        threshold: number;
+        deadline: bigint;
+        result_hash?: Buffer | null;
+      }
+    | undefined;
+  try {
+    const registryClient = new RegistryClient({
+      contractId: ids.registry,
+      rpcUrl: stellarConfig.rpcUrl,
+      networkPassphrase: stellarConfig.networkPassphrase,
+    });
+    const res = await registryClient.get_task({ task_id: taskIdBuffer(task) });
+    if (res.result && typeof res.result.unwrap === "function") {
+      try {
+        onChainTask = res.result.unwrap();
+      } catch {
+        // Not found or error
+      }
+    }
+  } catch {
+    // Task not found in registry
+  }
+
+  let updated: ReproTask = task;
+
+  // 3. If reward is funded in the vault and task is DRAFT or FAILED, advance to FUNDING
+  if (onChainReward && onChainReward.state.tag === "Funded") {
+    if (updated.status === "DRAFT" || updated.status === "FAILED") {
+      const fundEvent = await findTaskTransactionEvent(task, "FUND");
+      const fundTx = fundEvent?.hash || updated.vaultFundingTx || "onchain-verified";
+      updated = await recordTaskTransaction(
+        updated.id,
+        "FUND",
+        fundTx,
+        explorerTransactionUrl(fundTx),
+      );
+    }
+  }
+
+  // 4. If task is in registry, advance according to on-chain state
+  if (onChainTask) {
+    if (onChainTask.state.tag === "Open") {
+      if (updated.status === "DRAFT") {
+        const fundEvent = await findTaskTransactionEvent(task, "FUND");
+        const fundTx = fundEvent?.hash || updated.vaultFundingTx || "onchain-verified";
+        updated = await recordTaskTransaction(
+          updated.id,
+          "FUND",
+          fundTx,
+          explorerTransactionUrl(fundTx),
+        );
+      }
+      if (updated.status === "FUNDING") {
+        const regEvent = await findTaskTransactionEvent(task, "REGISTER");
+        const regTx = regEvent?.hash || updated.registryTx || "onchain-verified";
+        updated = await recordTaskTransaction(
+          updated.id,
+          "REGISTER",
+          regTx,
+          explorerTransactionUrl(regTx),
+        );
+      }
+    } else if (onChainTask.state.tag === "Completed") {
+      if (updated.status !== "VERIFIED") {
+        const finalEvent = await findTaskTransactionEvent(task, "FINALIZE");
+        const finalTx = finalEvent?.hash || updated.finalizationTx || "onchain-verified";
+        updated = await recordTaskTransaction(
+          updated.id,
+          "FINALIZE",
+          finalTx,
+          explorerTransactionUrl(finalTx),
+        );
+      }
+    } else if (onChainTask.state.tag === "Expired") {
+      if (updated.status !== "EXPIRED") {
+        const expEvent = await findTaskTransactionEvent(task, "REFUND");
+        const expTx = expEvent?.hash || updated.finalizationTx || "onchain-verified";
+        updated = await recordTaskTransaction(
+          updated.id,
+          "REFUND",
+          expTx,
+          explorerTransactionUrl(expTx),
+        );
+      }
+    }
+  }
+
+  return updated;
+}
+
