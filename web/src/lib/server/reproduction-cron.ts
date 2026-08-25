@@ -72,13 +72,17 @@ export function selectAutomationEnvironment(
     : undefined;
 }
 
+// ---------------------------------------------------------------------------
+// Form delivery
+// ---------------------------------------------------------------------------
+
 async function finishPendingForm(
   run: AutomationRun,
 ): Promise<Record<string, unknown>> {
   if (!run.formPayload)
-    throw new Error("A form-pending run is missing its payload.");
+    throw new Error("[FORM] A form-pending run is missing its payload.");
   await updateAutomationRun(run.windowKey, {
-    status: "FORM_SUBMITTING",
+    status: "FORM_PENDING",
     error: "",
   });
   try {
@@ -89,13 +93,17 @@ async function finishPendingForm(
         error instanceof GoogleFormSubmissionError && !error.ambiguous
           ? "FORM_PENDING"
           : "FORM_AMBIGUOUS",
-      error: error instanceof Error ? error.message : String(error),
+      error: `[FORM] ${error instanceof Error ? error.message : String(error)}`,
     });
     throw error;
   }
+  await updateAutomationRun(run.windowKey, {
+    status: "FORM_SUBMITTED",
+    formSubmittedAt: new Date().toISOString(),
+    error: "",
+  });
   const completed = await updateAutomationRun(run.windowKey, {
     status: "COMPLETED",
-    formSubmittedAt: new Date().toISOString(),
     error: "",
   });
   return {
@@ -115,8 +123,10 @@ async function finishHeldForms(
   preferredWindow?: string,
 ): Promise<Record<string, unknown>> {
   const held = await listAutomationRuns(taskId, [
-    "AWAITING_FINALIZATION",
+    "PAYMENT_CONFIRMED",
     "FINALIZATION_PENDING",
+    "FINALIZING",
+    "FINALIZED",
     "FORM_PENDING",
   ]);
   const failures: Array<{ window: string; status: string; error: string }> = [];
@@ -147,21 +157,14 @@ async function finishHeldForms(
     }
   }
   const uncertain = await listAutomationRuns(taskId, [
-    "FORM_SUBMITTING",
     "FORM_AMBIGUOUS",
   ]);
   for (const run of uncertain) {
-    if (run.status === "FORM_SUBMITTING") {
-      await updateAutomationRun(run.windowKey, {
-        status: "FORM_AMBIGUOUS",
-        error: "The process stopped while the Google Form request outcome was unknown.",
-      });
-    }
     if (!failures.some((failure) => failure.window === run.windowKey)) {
       failures.push({
         window: run.windowKey,
         status: "FORM_AMBIGUOUS",
-        error: run.error ?? "Google Form delivery requires an outcome audit.",
+        error: run.error ?? "[FORM] Google Form delivery requires an outcome audit.",
       });
     }
   }
@@ -176,39 +179,53 @@ async function finishHeldForms(
   return result;
 }
 
+// ---------------------------------------------------------------------------
+// Soroban finalization
+// ---------------------------------------------------------------------------
+
 async function finishPendingFinalization(
   run: AutomationRun,
 ): Promise<Record<string, unknown>> {
   let task = await getTask(run.taskId);
   if (!task) {
-    throw new Error("Target task not found while finalizing the cron run.");
+    throw new Error("[FINALIZATION] Target task not found while finalizing the cron run.");
   }
   if (task.status === "VERIFYING") {
     validateAutomationMaintainer(task);
     task = await reserveTaskFinalization(task.id);
   }
+
+  // Attempt recovery of a previously checkpointed finalization envelope.
+  await updateAutomationRun(run.windowKey, {
+    status: "FINALIZING",
+    error: "",
+  });
   let finalizationHash = await recoverAutomatedFinalization(
     task,
     run.finalizationHash,
     run.finalizationXdr,
   );
+
   if (!finalizationHash) {
     if (run.finalizationXdr || run.finalizationHash) {
       await clearAutomationFinalizationEnvelope(run.windowKey, true);
     }
+    // Prepare and checkpoint the signed envelope before submission.
     finalizationHash = await finalizeTaskForAutomation(
       task,
       async (submittedHash, signedXdr) => {
         await updateAutomationRun(run.windowKey, {
-          status: "FINALIZATION_PENDING",
+          status: "FINALIZING",
           finalizationHash: submittedHash,
           finalizationXdr: signedXdr,
         });
       },
     );
   }
+
+  // Soroban confirmed and payouts verified.
   await updateAutomationRun(run.windowKey, {
-    status: "FINALIZATION_PENDING",
+    status: "FINALIZED",
     finalizationHash,
     error: "",
   });
@@ -216,12 +233,16 @@ async function finishPendingFinalization(
   return finishHeldForms(run.taskId, finalizationHash, run.windowKey);
 }
 
+// ---------------------------------------------------------------------------
+// Post-payment continuation
+// ---------------------------------------------------------------------------
+
 async function finishConfirmedSubmission(
   run: AutomationRun,
 ): Promise<Record<string, unknown>> {
   const task = await getTask(run.taskId);
   if (!task) {
-    throw new Error("Target task not found after evidence confirmation.");
+    throw new Error("[PAYMENT] Target task not found after evidence confirmation.");
   }
   if (
     task.status === "VERIFIED" ||
@@ -232,11 +253,11 @@ async function finishConfirmedSubmission(
       status: "FINALIZATION_PENDING",
     });
     const latest = await getAutomationRun(run.windowKey);
-    if (!latest) throw new Error("Finalization-pending cron run disappeared.");
+    if (!latest) throw new Error("[FINALIZATION] Finalization-pending cron run disappeared.");
     return finishPendingFinalization(latest);
   }
   const waiting = await updateAutomationRun(run.windowKey, {
-    status: "AWAITING_FINALIZATION",
+    status: "PAYMENT_CONFIRMED",
     error: "",
   });
   return {
@@ -249,11 +270,14 @@ async function finishConfirmedSubmission(
   };
 }
 
+// ---------------------------------------------------------------------------
+// Recovery from interrupted runs
+// ---------------------------------------------------------------------------
+
 async function recoverPendingSubmission(
   run: AutomationRun,
 ): Promise<Record<string, unknown> | undefined> {
   if (
-    run.status !== "SUBMISSION_PENDING" ||
     !run.submissionId ||
     !run.wallet ||
     !run.transactionHash
@@ -261,7 +285,7 @@ async function recoverPendingSubmission(
     return undefined;
   const task = await getTask(run.taskId);
   if (!task)
-    throw new Error("Target task not found while recovering the cron run.");
+    throw new Error("[PAYMENT] Target task not found while recovering the cron run.");
   await verifyTestnetTransaction(run.transactionHash, run.wallet);
   const explorerUrl = explorerTransactionUrl(run.transactionHash);
   await attachSubmissionTransaction(
@@ -276,49 +300,106 @@ async function recoverPendingSubmission(
     run.transactionHash,
     explorerUrl,
   );
+  await updateAutomationRun(run.windowKey, {
+    status: "PAYMENT_CONFIRMED",
+    error: "",
+  });
   const latest = await getAutomationRun(run.windowKey);
-  if (!latest) throw new Error("Recovered cron run disappeared.");
+  if (!latest) throw new Error("[PAYMENT] Recovered cron run disappeared.");
   return finishConfirmedSubmission(latest);
 }
 
 async function continueExistingRun(
   run: AutomationRun,
 ): Promise<Record<string, unknown> | undefined> {
-  if (run.status === "FORM_PENDING") {
-    const completed = await finishPendingForm(run);
-    const task = await getTask(run.taskId);
-    if (task?.status === "VERIFIED" && task.finalizationTx) {
-      return finishHeldForms(run.taskId, task.finalizationTx, run.windowKey);
-    }
-    return completed;
-  }
-  if (run.status === "FINALIZATION_PENDING") {
-    return finishPendingFinalization(run);
-  }
-  if (run.status === "SUBMISSION_PENDING") {
-    if (!run.submissionId || !run.wallet || !run.transactionHash) {
-      if (run.submissionId) {
-        await failSubmissionTransaction(
-          run.submissionId,
-          run.taskId,
-          "The automated run stopped before a confirmed Testnet transaction was recorded.",
-        ).catch(() => undefined);
-      }
-      await updateAutomationRun(run.windowKey, {
-        status: "FAILED",
-        error:
-          "The automated run stopped before a confirmed Testnet transaction was recorded.",
+  switch (run.status) {
+    case "FORM_PENDING":
+      return finishPendingForm(run);
+
+    case "FORM_SUBMITTED": {
+      const completed = await updateAutomationRun(run.windowKey, {
+        status: "COMPLETED",
+        error: "",
       });
+      return {
+        status: "completed",
+        window: completed.windowKey,
+        googleForm: "already submitted",
+      };
+    }
+
+    case "FINALIZED": {
+      const task = await getTask(run.taskId);
+      if (task?.status === "VERIFIED" && task.finalizationTx) {
+        return finishHeldForms(run.taskId, task.finalizationTx, run.windowKey);
+      }
+      if (run.formPayload) return finishPendingForm(run);
+      return updateAutomationRun(run.windowKey, { status: "COMPLETED", error: "" }).then(
+        (completed) => ({ status: "completed", window: completed.windowKey }),
+      );
+    }
+
+    case "FINALIZING":
+    case "FINALIZATION_PENDING":
+      return finishPendingFinalization(run);
+
+    case "PAYMENT_CONFIRMED": {
+      const task = await getTask(run.taskId);
+      if (task?.status === "VERIFIED" && task.finalizationTx) {
+        if (run.formPayload) {
+          await updateAutomationRun(run.windowKey, {
+            status: "FORM_PENDING",
+            finalizationHash: task.finalizationTx,
+            error: "",
+          });
+          const pending = await getAutomationRun(run.windowKey);
+          if (pending) return finishPendingForm(pending);
+        }
+        return updateAutomationRun(run.windowKey, {
+          status: "COMPLETED",
+          finalizationHash: task.finalizationTx,
+          error: "",
+        }).then((completed) => ({
+          status: "completed",
+          window: completed.windowKey,
+          googleForm: "no form payload",
+        }));
+      }
       return undefined;
     }
-    return recoverPendingSubmission(run);
+
+    case "EVIDENCE_SUBMITTED": {
+      if (!run.submissionId || !run.wallet || !run.transactionHash) {
+        if (run.submissionId) {
+          await failSubmissionTransaction(
+            run.submissionId,
+            run.taskId,
+            "[PAYMENT] The automated run stopped before a confirmed Testnet transaction was recorded.",
+          ).catch(() => undefined);
+        }
+        await updateAutomationRun(run.windowKey, {
+          status: "FAILED",
+          error:
+            "[PAYMENT] The automated run stopped before a confirmed Testnet transaction was recorded.",
+        });
+        return undefined;
+      }
+      return recoverPendingSubmission(run);
+    }
+
+    case "STARTED":
+    default:
+      await updateAutomationRun(run.windowKey, {
+        status: "FAILED",
+        error: "[STARTED] The automated run stopped before evidence submission was created.",
+      });
+      return undefined;
   }
-  await updateAutomationRun(run.windowKey, {
-    status: "FAILED",
-    error: "The automated run stopped before evidence submission was created.",
-  });
-  return undefined;
 }
+
+// ---------------------------------------------------------------------------
+// Main orchestration
+// ---------------------------------------------------------------------------
 
 export async function runAutomatedReproduction(): Promise<
   Record<string, unknown>
@@ -340,7 +421,7 @@ export async function runAutomatedReproduction(): Promise<
   let recoveryRun: AutomationRun | undefined;
   try {
     let run = await getAutomationRun(windowKey);
-    if (run?.status === "COMPLETED" || run?.status === "AWAITING_FINALIZATION")
+    if (run?.status === "COMPLETED" || run?.status === "PAYMENT_CONFIRMED")
       return {
         status: "skipped",
         reason: "This 30-minute window has already submitted its evidence.",
@@ -376,7 +457,7 @@ export async function runAutomatedReproduction(): Promise<
       await updateAutomationRun(windowKey, { status: "FINALIZATION_PENDING" });
       const finalizationRun = await getAutomationRun(windowKey);
       if (!finalizationRun) {
-        throw new Error("Finalization-only cron run disappeared.");
+        throw new Error("[FINALIZATION] Finalization-only cron run disappeared.");
       }
       return finishPendingFinalization(finalizationRun);
     }
@@ -439,7 +520,7 @@ export async function runAutomatedReproduction(): Promise<
     );
     pendingSubmissionId = pending.submission.id;
     await updateAutomationRun(windowKey, {
-      status: "SUBMISSION_PENDING",
+      status: "EVIDENCE_SUBMITTED",
       submissionId: pendingSubmissionId,
     });
 
@@ -450,7 +531,7 @@ export async function runAutomatedReproduction(): Promise<
     );
     transactionHash = payment.hash;
     await updateAutomationRun(windowKey, {
-      status: "SUBMISSION_PENDING",
+      status: "PAYMENT_CONFIRMED",
       transactionHash,
     });
     await attachSubmissionTransaction(
@@ -467,7 +548,7 @@ export async function runAutomatedReproduction(): Promise<
     );
     const latest = await getAutomationRun(windowKey);
     if (!latest)
-      throw new Error("Cron run disappeared after transaction confirmation.");
+      throw new Error("[PAYMENT] Cron run disappeared after transaction confirmation.");
     return finishConfirmedSubmission(latest);
   } catch (error) {
     if (recoveryRun) {
@@ -477,12 +558,14 @@ export async function runAutomatedReproduction(): Promise<
       await updateAutomationRun(recoveryRun.windowKey, {
         status:
           current?.status === "FORM_PENDING" ||
-          current?.status === "FORM_SUBMITTING" ||
+          current?.status === "FORM_SUBMITTED" ||
           current?.status === "FORM_AMBIGUOUS"
             ? current.status
-            : current?.status === "FINALIZATION_PENDING"
-              ? "FINALIZATION_PENDING"
-            : "SUBMISSION_PENDING",
+            : current?.status === "FINALIZING" || current?.status === "FINALIZATION_PENDING"
+              ? current.status
+            : current?.status === "FINALIZED"
+              ? "FINALIZED"
+            : "EVIDENCE_SUBMITTED",
         error: error instanceof Error ? error.message : String(error),
       }).catch(() => undefined);
       throw error;
@@ -497,12 +580,14 @@ export async function runAutomatedReproduction(): Promise<
     const current = await getAutomationRun(windowKey).catch(() => undefined);
     const status =
       current?.status === "FORM_PENDING" ||
-      current?.status === "FORM_SUBMITTING" ||
+      current?.status === "FORM_SUBMITTED" ||
       current?.status === "FORM_AMBIGUOUS" ||
-      current?.status === "FINALIZATION_PENDING"
+      current?.status === "FINALIZING" ||
+      current?.status === "FINALIZATION_PENDING" ||
+      current?.status === "FINALIZED"
         ? current.status
         : transactionHash
-          ? "SUBMISSION_PENDING"
+          ? "EVIDENCE_SUBMITTED"
           : "FAILED";
     await updateAutomationRun(windowKey, {
       status,

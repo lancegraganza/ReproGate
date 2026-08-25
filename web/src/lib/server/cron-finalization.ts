@@ -75,26 +75,30 @@ export async function recoverAutomatedFinalization(
   recordedHash?: string,
   recordedXdr?: string,
 ): Promise<string | undefined> {
-  if (recordedHash) {
-    if (recordedXdr) {
-      try {
-        const ledger = await submitSignedContractTransaction(recordedXdr, recordedHash);
-        return verifyAndRecordFinalization(task, recordedHash, ledger);
-      } catch (error) {
-        if (!(error instanceof SignedContractTransactionExpiredError)) throw error;
-        const event = await findTaskTransactionEvent(task, "FINALIZE");
-        if (event) return verifyAndRecordFinalization(task, event.hash, event.ledger);
-        return undefined;
+  try {
+    if (recordedHash) {
+      if (recordedXdr) {
+        try {
+          const ledger = await submitSignedContractTransaction(recordedXdr, recordedHash);
+          return await verifyAndRecordFinalization(task, recordedHash, ledger);
+        } catch (error) {
+          if (!(error instanceof SignedContractTransactionExpiredError)) throw error;
+          const event = await findTaskTransactionEvent(task, "FINALIZE");
+          if (event) return await verifyAndRecordFinalization(task, event.hash, event.ledger);
+          return undefined;
+        }
       }
+      return await verifyAndRecordFinalization(task, recordedHash);
     }
-    return verifyAndRecordFinalization(task, recordedHash);
+    if (task.status === "VERIFIED" && task.finalizationTx) {
+      return await verifyAndRecordFinalization(task, task.finalizationTx);
+    }
+    const event = await findTaskTransactionEvent(task, "FINALIZE");
+    if (!event) return undefined;
+    return await verifyAndRecordFinalization(task, event.hash, event.ledger);
+  } catch (error) {
+    throw new Error(`[FINALIZATION:RECOVER] ${error instanceof Error ? error.message : String(error)}`);
   }
-  if (task.status === "VERIFIED" && task.finalizationTx) {
-    return verifyAndRecordFinalization(task, task.finalizationTx);
-  }
-  const event = await findTaskTransactionEvent(task, "FINALIZE");
-  if (!event) return undefined;
-  return verifyAndRecordFinalization(task, event.hash, event.ledger);
 }
 
 export async function finalizeTaskForAutomation(
@@ -110,26 +114,49 @@ export async function finalizeTaskForAutomation(
   const signer = maintainerKeypair(task);
   const nodeSigner = basicNodeSigner(signer, stellarConfig.networkPassphrase);
   const { registry } = requireContractIds();
-  const client = new RegistryClient({
-    contractId: registry,
-    rpcUrl: stellarConfig.rpcUrl,
-    networkPassphrase: stellarConfig.networkPassphrase,
-    publicKey: signer.publicKey(),
-    signTransaction: nodeSigner.signTransaction,
-    signAuthEntry: nodeSigner.signAuthEntry,
-  });
-  const transaction = await client.finalize({
-    task_id: Buffer.from(task.taskHash, "hex"),
-    result_hash: Buffer.from(task.verification.resultHash, "hex"),
-    contributors: task.verification.acceptedWallets,
-  });
-  await transaction.sign();
-  if (!transaction.signed) {
-    throw new Error("Soroban finalization could not produce a signed transaction.");
+  
+  let transaction;
+  try {
+    const client = new RegistryClient({
+      contractId: registry,
+      rpcUrl: stellarConfig.rpcUrl,
+      networkPassphrase: stellarConfig.networkPassphrase,
+      publicKey: signer.publicKey(),
+      signTransaction: nodeSigner.signTransaction,
+      signAuthEntry: nodeSigner.signAuthEntry,
+    });
+    transaction = await client.finalize({
+      task_id: Buffer.from(task.taskHash, "hex"),
+      result_hash: Buffer.from(task.verification.resultHash, "hex"),
+      contributors: task.verification.acceptedWallets,
+    });
+  } catch (error) {
+    throw new Error(`[FINALIZATION:PREPARE] ${error instanceof Error ? error.message : String(error)}`);
   }
+
+  try {
+    await transaction.sign();
+    if (!transaction.signed) {
+      throw new Error("Soroban finalization could not produce a signed transaction.");
+    }
+  } catch (error) {
+    throw new Error(`[FINALIZATION:SIGN] ${error instanceof Error ? error.message : String(error)}`);
+  }
+
   const signedXdr = transaction.signed.toXdr();
   const hash = Buffer.from(transaction.signed.hash()).toString("hex");
   await onPrepared?.(hash, signedXdr);
-  const ledger = await submitSignedContractTransaction(signedXdr, hash);
-  return verifyAndRecordFinalization(task, hash, ledger);
+  
+  let ledger;
+  try {
+    ledger = await submitSignedContractTransaction(signedXdr, hash);
+  } catch (error) {
+    throw new Error(`[FINALIZATION:SUBMIT] ${error instanceof Error ? error.message : String(error)}`);
+  }
+  
+  try {
+    return await verifyAndRecordFinalization(task, hash, ledger);
+  } catch (error) {
+    throw new Error(`[FINALIZATION:VERIFY] ${error instanceof Error ? error.message : String(error)}`);
+  }
 }

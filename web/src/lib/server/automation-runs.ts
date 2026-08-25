@@ -5,12 +5,14 @@ import type { GoogleFormPayload } from "./google-form";
 import { getDatabase, initializeDatabase } from "./database";
 
 export type AutomationRunStatus =
-  | "RUNNING"
-  | "SUBMISSION_PENDING"
-  | "AWAITING_FINALIZATION"
+  | "STARTED"
+  | "EVIDENCE_SUBMITTED"
+  | "PAYMENT_CONFIRMED"
   | "FINALIZATION_PENDING"
+  | "FINALIZING"
+  | "FINALIZED"
   | "FORM_PENDING"
-  | "FORM_SUBMITTING"
+  | "FORM_SUBMITTED"
   | "FORM_AMBIGUOUS"
   | "COMPLETED"
   | "FAILED";
@@ -100,9 +102,11 @@ export async function getAutomationRun(windowKey: string): Promise<AutomationRun
 export async function getLatestAutomationRun(
   taskId: string,
   statuses: AutomationRunStatus[] = [
-    "RUNNING",
-    "SUBMISSION_PENDING",
+    "STARTED",
+    "EVIDENCE_SUBMITTED",
     "FINALIZATION_PENDING",
+    "FINALIZING",
+    "FINALIZED",
     "FORM_PENDING",
   ],
 ): Promise<AutomationRun | undefined> {
@@ -114,9 +118,11 @@ export async function getLatestAutomationRun(
       WHERE task_id = ? AND status IN (${placeholders})
       ORDER BY CASE status
         WHEN 'FORM_PENDING' THEN 0
-        WHEN 'FINALIZATION_PENDING' THEN 1
-        WHEN 'SUBMISSION_PENDING' THEN 2
-        ELSE 3
+        WHEN 'FINALIZED' THEN 1
+        WHEN 'FINALIZING' THEN 2
+        WHEN 'FINALIZATION_PENDING' THEN 3
+        WHEN 'EVIDENCE_SUBMITTED' THEN 4
+        ELSE 5
       END, updated_at DESC LIMIT 1`,
     args: [taskId, ...statuses],
   });
@@ -145,9 +151,9 @@ export async function startAutomationRun(windowKey: string, taskId: string): Pro
   await getDatabase().execute({
     sql: `INSERT INTO automated_reproduction_runs
       (window_key, task_id, status, created_at, updated_at)
-      VALUES (?, ?, 'RUNNING', ?, ?)
+      VALUES (?, ?, 'STARTED', ?, ?)
       ON CONFLICT(window_key) DO UPDATE SET task_id = excluded.task_id,
-        status = 'RUNNING', wallet = NULL, submission_id = NULL,
+        status = 'STARTED', wallet = NULL, submission_id = NULL,
         transaction_hash = NULL, finalization_hash = NULL, finalization_xdr = NULL,
         form_payload_json = NULL, error = NULL,
         form_submitted_at = NULL, updated_at = excluded.updated_at`,

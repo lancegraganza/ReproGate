@@ -41,7 +41,7 @@ describe("automation settlement checkpoints", () => {
     );
     await startAutomationRun("window-a", task.id);
     await updateAutomationRun("window-a", {
-      status: "AWAITING_FINALIZATION",
+      status: "PAYMENT_CONFIRMED",
       formPayload: {
         fullName: "Mika Dalisay",
         email: "mika.dalisay2002@gmail.com",
@@ -60,7 +60,7 @@ describe("automation settlement checkpoints", () => {
     });
     expect((await getLatestAutomationRun(task.id))?.windowKey).toBe("window-b");
     expect(
-      (await listAutomationRuns(task.id, ["AWAITING_FINALIZATION"]))
+      (await listAutomationRuns(task.id, ["PAYMENT_CONFIRMED"]))
         .map((run) => run.windowKey),
     ).toEqual(["window-a"]);
     const confirmed = await clearAutomationFinalizationEnvelope("window-b");

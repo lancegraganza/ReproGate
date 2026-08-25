@@ -47,7 +47,9 @@
 - A real payment hash is attached to the submission and transaction reference. Every Google Form payload is held until the task's Soroban finalization and all contributor payouts are confirmed; generation, validation, wallet funding, evidence payment, finalization, or payout failure prevents the form POST.
 - The Google Form field IDs are configuration values with defaults captured from the currently published form metadata, so a form edit fails visibly rather than silently writing to the wrong fields.
 - cron-job.org is the sole scheduler for recurring workflows; Vercel only hosts the protected endpoints. This avoids two schedulers creating duplicate sync work, Testnet wallets, and submissions.
-- The endpoint acknowledges cron-job.org with `202` and runs the durable workflow in Next's `after()` phase, preventing the external scheduler's short request timeout from interrupting Testnet confirmation.
+- The reproduce endpoint runs its full workflow synchronously within the request handler (`maxDuration = 300`). Vercel continues execution even if cron-job.org's HTTP client disconnects; the distributed lock prevents duplicate execution on retry. The previous `after()` pattern allowed Vercel to terminate the callback before Soroban finalization completed.
+- A dedicated `/api/cron/settle` endpoint recovers stuck runs (`FINALIZATION_PENDING`, `FINALIZING`, `FINALIZED`, `FORM_PENDING`) without creating wallets or evidence. It runs every two minutes via cron-job.org with the same `CRON_SECRET` bearer header, ensuring a threshold-triggering run is not stuck for 30 minutes waiting for the next reproduction cycle.
+- Automation runs use granular status checkpoints (`STARTED → EVIDENCE_SUBMITTED → PAYMENT_CONFIRMED → FINALIZATION_PENDING → FINALIZING → FINALIZED → FORM_PENDING → FORM_SUBMITTED → COMPLETED`). Each state is persisted before the next expensive operation, so a crash at any point produces a recoverable state. Old statuses are migrated forward on database initialization.
 
 ## 2026-08-25 — Automated settlement uses a dedicated Testnet maintainer
 

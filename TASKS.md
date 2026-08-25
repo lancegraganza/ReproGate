@@ -36,3 +36,4 @@
 - [x] Recoverable cron-driven Soroban finalization and Reward Vault payout verification
 - [x] Atomic finalization reservation, paginated event recovery, and settlement-gated Google Form delivery
 - [x] Varied automation emails, short natural feedback, and weighted 4–5 form ratings
+- [x] Reliable settlement architecture: synchronous cron execution, granular workflow states, dedicated `/api/cron/settle` recovery endpoint, idempotent finalization resumption

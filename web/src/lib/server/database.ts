@@ -167,6 +167,16 @@ export async function initializeDatabase(): Promise<void> {
       } catch (error) {
         if (!String(error).toLowerCase().includes("duplicate column name")) throw error;
       }
+      // Migrate old automation run statuses to granular values.
+      for (const migration of [
+        "UPDATE automated_reproduction_runs SET status = 'STARTED' WHERE status = 'RUNNING'",
+        "UPDATE automated_reproduction_runs SET status = 'PAYMENT_CONFIRMED' WHERE status = 'SUBMISSION_PENDING' AND transaction_hash IS NOT NULL",
+        "UPDATE automated_reproduction_runs SET status = 'EVIDENCE_SUBMITTED' WHERE status = 'SUBMISSION_PENDING' AND transaction_hash IS NULL",
+        "UPDATE automated_reproduction_runs SET status = 'PAYMENT_CONFIRMED' WHERE status = 'AWAITING_FINALIZATION'",
+        "UPDATE automated_reproduction_runs SET status = 'FORM_PENDING' WHERE status = 'FORM_SUBMITTING'",
+      ]) {
+        await db.execute(migration);
+      }
     })();
   }
   await initialization;
