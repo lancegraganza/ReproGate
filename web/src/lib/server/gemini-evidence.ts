@@ -1,7 +1,7 @@
 import "server-only";
 
 import { z } from "zod";
-import type { ReproTask } from "@/types/domain";
+import type { ReproTask, StructuredEnvironment } from "@/types/domain";
 
 const generatedEvidenceSchema = z.object({
   verdict: z.literal("REPRODUCED"),
@@ -115,7 +115,11 @@ function parseJson(value: string): unknown {
   return JSON.parse(fenced);
 }
 
-export async function generateEvidence(task: ReproTask, seed: string): Promise<GeneratedEvidence> {
+export async function generateEvidence(
+  task: ReproTask,
+  seed: string,
+  requiredEnvironment?: StructuredEnvironment,
+): Promise<GeneratedEvidence> {
   const apiKey = process.env.GEMINI_API_KEY?.trim() || process.env.GOOGLE_GEMINI_API_KEY?.trim();
   if (!apiKey) throw new Error("GEMINI_API_KEY is not configured.");
   const model = process.env.GEMINI_MODEL?.trim() || "gemini-3.1-flash-lite";
@@ -128,6 +132,7 @@ export async function generateEvidence(task: ReproTask, seed: string): Promise<G
       body: task.githubIssue.body.slice(0, 12_000),
       url: task.githubIssue.url,
     },
+    requiredEnvironment,
   });
   const prompt = `Create one synthetic but technically realistic independent reproduction evidence package for this ReproGate task.
 
@@ -138,6 +143,7 @@ Requirements:
 - Return JSON only with exactly: verdict, environment, reproductionSteps, relevantLogs, notes, googleFeedback.
 - verdict must be REPRODUCED because this cron exercises the reproduce-evidence path.
 - environment must be an object with operatingSystem, runtime, runtimeVersion, packageManager, packageManagerVersion, and a dependencies object; never return environment as a string.
+- When requiredEnvironment is present in the task context, reproduce it exactly. Randomize observations and wording, not its normalized versions or dependencies.
 - dependencies must be a JSON object whose keys are dependency names and whose values are version strings.
 - Keep the environment internally consistent with the actual issue. Prefer the mobile/device environment described in the issue when it is relevant; otherwise use a plausible current developer environment.
 - Make reproductionSteps concrete, ordered, and at least 30 characters. Make logs plausible but concise; do not invent secrets, credentials, private URLs, or an on-chain transaction.

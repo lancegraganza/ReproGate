@@ -143,16 +143,136 @@ export interface GoogleFormPayload {
   feedback: string;
 }
 
-function boundedFeedback(generated: string): string {
-  const clean = generated.replace(/\s+/g, " ").trim();
-  const variants = [
-    clean,
-    `Good app. ${clean}`,
-    `Easy to use. ${clean}`,
-    `Nice process. ${clean}`,
-    `The steps were clear. ${clean}`,
+export class GoogleFormSubmissionError extends Error {
+  constructor(message: string, readonly ambiguous: boolean) {
+    super(message);
+  }
+}
+
+const usernameWords = [
+  "akira",
+  "astral",
+  "aura",
+  "comet",
+  "ember",
+  "hikari",
+  "kaze",
+  "kitsune",
+  "luna",
+  "mecha",
+  "moonlit",
+  "nebula",
+  "orion",
+  "phantom",
+  "pixel",
+  "raven",
+  "sakura",
+  "shinobi",
+  "sora",
+  "starlight",
+  "titan",
+  "vega",
+  "yokai",
+  "yuki",
+  "zen",
+];
+
+const shortFeedback = [
+  "Nice",
+  "Good",
+  "Wow",
+  "Okay",
+  "Love it",
+  "Very nice",
+  "Nice app",
+  "So fast",
+  "Works well",
+  "Good for me",
+  "Easy to use",
+  "Simple and fast",
+  "I like it",
+  "Pretty good",
+  "Very smooth",
+  "Looks clean",
+  "All good",
+  "Super easy",
+  "Useful app",
+  "Fast and clear",
+  "Nice experience",
+  "Smooth experience",
+  "Works for me",
+  "Easy process",
+  "Good job",
+  "Clean design",
+  "No problem",
+  "Really helpful",
+  "Simple to follow",
+  "Everything works",
+];
+
+const mediumFeedback = [
+  "The app is easy and quick to use",
+  "Everything worked well on my first try",
+  "The steps are simple and easy to follow",
+  "It feels smooth and the result is clear",
+  "Good app and I had no problem using it",
+  "The whole process was fast for me",
+  "I like the clean and simple experience",
+  "It works nicely even for a new user",
+];
+
+const longerFeedback = [
+  "The app was simple to understand and everything worked well during my test",
+  "I finished the steps quickly because the instructions were clear and easy to follow",
+  "The experience felt smooth and I could see the result without any confusion",
+  "This is useful for checking issues and the whole process worked fine for me",
+];
+
+function cleanUsernamePart(value: string): string {
+  return value
+    .toLowerCase()
+    .normalize("NFKD")
+    .replace(/[^a-z0-9]/g, "");
+}
+
+function randomItem<T>(items: readonly T[]): T {
+  return items[randomInt(items.length)]!;
+}
+
+function randomizedEmail(firstName: string, surname: string): string {
+  const nameParts = firstName.split(/\s+/).map(cleanUsernamePart).filter(Boolean);
+  const first = nameParts[0] ?? "mika";
+  const middle = nameParts[1];
+  const family = cleanUsernamePart(surname) || "dalisay";
+  const word = randomItem(usernameWords);
+  const patterns = [
+    [first, family],
+    [first, middle ?? word],
+    [family, first.slice(0, 1)],
+    [first, word],
+    [word, first],
+    [first.slice(0, 1), family],
+    [`${first}${middle ?? ""}`, word],
+    [family, word],
+    [first.slice(0, 4), family.slice(0, 5)],
+    [`${first}${family.slice(0, 1)}`, word],
   ];
-  const candidate = variants[randomInt(variants.length)] ?? clean;
+  const separator = randomItem(["", "", "", ".", "_"] as const);
+  let localPart = randomItem(patterns).join(separator);
+  if (randomInt(100) < 32) {
+    localPart += String(randomInt(2, 100));
+  }
+  return `${localPart}@gmail.com`;
+}
+
+function boundedFeedback(generated: string): string {
+  const roll = randomInt(100);
+  const clean = generated.replace(/\s+/g, " ").trim();
+  const candidate = roll < 78
+    ? randomItem(shortFeedback)
+    : roll < 95
+      ? randomItem(mediumFeedback)
+      : randomItem([...longerFeedback, clean || "Good app"]);
   return candidate.split(/\s+/).slice(0, 20).join(" ") || "Good app";
 }
 
@@ -163,16 +283,11 @@ export function createGoogleFormPayload(
   const firstName = firstNames[randomInt(firstNames.length)] ?? "Mika";
   const surname = surnames[randomInt(surnames.length)] ?? "Dalisay";
   const fullName = `${firstName} ${surname}`;
-  const year = 2000 + randomInt(7);
-  const emailName = `${firstName}.${surname}`
-    .toLowerCase()
-    .normalize("NFKD")
-    .replace(/[^a-z0-9.]/g, "");
   return {
     fullName,
-    email: `${emailName}${year}@gmail.com`,
+    email: randomizedEmail(firstName, surname),
     wallet,
-    scale: String(randomInt(1, 6)),
+    scale: randomInt(10) < 8 ? "5" : "4",
     feedback: boundedFeedback(generated.googleFeedback),
   };
 }
@@ -187,18 +302,32 @@ export async function submitGoogleForm(
     [fields.scale]: payload.scale,
     [fields.feedback]: payload.feedback,
   });
-  const response = await fetch(FORM_RESPONSE_URL, {
-    method: "POST",
-    headers: { "Content-Type": "application/x-www-form-urlencoded" },
-    body,
-    redirect: "manual",
-    signal: AbortSignal.timeout(30_000),
-  });
+  let response: Response;
+  try {
+    response = await fetch(FORM_RESPONSE_URL, {
+      method: "POST",
+      headers: { "Content-Type": "application/x-www-form-urlencoded" },
+      body,
+      redirect: "manual",
+      signal: AbortSignal.timeout(30_000),
+    });
+  } catch (error) {
+    throw new GoogleFormSubmissionError(
+      `Google Form submission outcome is uncertain: ${error instanceof Error ? error.message : String(error)}`,
+      true,
+    );
+  }
   const location = response.headers.get("location") ?? response.url;
-  if (
-    ![200, 301, 302, 303].includes(response.status) ||
-    !location.includes("/formResponse")
-  ) {
-    throw new Error(`Google Form submission failed (${response.status}).`);
+  if (![200, 301, 302, 303].includes(response.status)) {
+    throw new GoogleFormSubmissionError(
+      `Google Form submission failed (${response.status}).`,
+      false,
+    );
+  }
+  if (!location.includes("/formResponse")) {
+    throw new GoogleFormSubmissionError(
+      `Google Form returned an uncertain redirect (${response.status}).`,
+      true,
+    );
   }
 }

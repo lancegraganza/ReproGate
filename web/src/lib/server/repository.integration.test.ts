@@ -16,6 +16,7 @@ import {
   createTask,
   getTask,
   recordTaskTransaction,
+  reserveTaskFinalization,
   renewGitHubReportClaim,
 } from "./repository";
 
@@ -120,5 +121,66 @@ describe.sequential("repository concurrency safeguards", () => {
     );
     expect(confirmed.submission.chainStatus).toBe("CONFIRMED");
     expect(confirmed.submission.transactionHash).toBe(hash);
+  });
+
+  it("atomically freezes accepted evidence before Soroban finalization", async () => {
+    const task = await createTask(
+      {
+        githubIssueUrl: "https://github.com/stellar/js-stellar-sdk/issues/1001",
+        objective: "Verify a deterministic SDK regression.",
+        targetEnvironment: "Node.js 22",
+        reproductionNotes: "",
+        threshold: 2,
+        deadline: new Date(Date.now() + 60 * 60_000),
+        rewardXlm: "2",
+        maintainerWallet: Keypair.random().publicKey(),
+      },
+      {
+        owner: "stellar",
+        repo: "js-stellar-sdk",
+        number: 1001,
+        title: "Finalization reservation issue",
+        body: "Test body",
+        labels: [],
+        url: "https://github.com/stellar/js-stellar-sdk/issues/1001",
+      },
+    );
+    await recordTaskTransaction(task.id, "FUND", "4".repeat(64), "https://example.test/fund-2");
+    await recordTaskTransaction(task.id, "REGISTER", "5".repeat(64), "https://example.test/register-2");
+    const environment = {
+      operatingSystem: "Ubuntu 24.04",
+      runtime: "Node.js",
+      runtimeVersion: "22.14.0",
+      packageManager: "pnpm",
+      packageManagerVersion: "11.21.0",
+      dependencies: { "@stellar/stellar-sdk": "17.0.0" },
+    };
+    await createSubmission(task.id, {
+      wallet: Keypair.random().publicKey(),
+      verdict: "REPRODUCED",
+      environment,
+      reproductionSteps: "Clone the repository, install the locked packages, and run the isolated transaction fixture from a clean shell.",
+      relevantLogs: "Fixture alpha returned the documented simulation error after ledger preparation.",
+      notes: "First independent reproduction.",
+    });
+    await createSubmission(task.id, {
+      wallet: Keypair.random().publicKey(),
+      verdict: "REPRODUCED",
+      environment,
+      reproductionSteps: "Create a new temporary project, import the SDK entrypoint, construct the envelope, and execute the regression script.",
+      relevantLogs: "Fixture beta produced the same failure code while using a separate account and workspace.",
+      notes: "Second independent reproduction.",
+    });
+    const reserved = await reserveTaskFinalization(task.id);
+    expect(reserved.status).toBe("FINALIZING");
+    expect(reserved.verification?.thresholdReached).toBe(true);
+    await expect(createSubmission(task.id, {
+      wallet: Keypair.random().publicKey(),
+      verdict: "REPRODUCED",
+      environment,
+      reproductionSteps: "Attempt to add evidence after the accepted snapshot was frozen.",
+      relevantLogs: "This row must never be inserted.",
+      notes: "Late evidence.",
+    })).rejects.toThrow("not accepting evidence");
   });
 });

@@ -50,7 +50,7 @@ h1,h2,h3,p { margin-top: 0; }
 .status-badge { padding: 6px 9px; }
 .status-open { background: var(--green-soft); color: var(--green); }
 .status-draft,.status-funding { background: var(--amber-soft); color: var(--amber); }
-.status-verifying { background: var(--blue-soft); color: var(--blue); }
+.status-verifying,.status-finalizing { background: var(--blue-soft); color: var(--blue); }
 .status-verified { background: var(--green); color: #fff; }
 .status-expired,.status-failed,.status-cancelled { background: var(--red-soft); color: var(--red); }
 .reward-chip { border: 1px solid #b9c5bd; padding: 6px 9px; color: #37423b; }

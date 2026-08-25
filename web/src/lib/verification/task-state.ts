@@ -4,7 +4,8 @@ const transitions: Record<TaskStatus, TaskStatus[]> = {
   DRAFT: ["FUNDING", "CANCELLED", "FAILED"],
   FUNDING: ["OPEN", "FAILED"],
   OPEN: ["VERIFYING", "EXPIRED", "CANCELLED", "FAILED"],
-  VERIFYING: ["OPEN", "VERIFIED", "EXPIRED", "FAILED"],
+  VERIFYING: ["OPEN", "FINALIZING", "VERIFIED", "EXPIRED", "FAILED"],
+  FINALIZING: ["VERIFIED", "VERIFYING", "EXPIRED", "FAILED"],
   VERIFIED: [],
   EXPIRED: [],
   CANCELLED: [],
@@ -20,4 +21,3 @@ export function assertTaskTransition(from: TaskStatus, to: TaskStatus): void {
     throw new Error(`Invalid task transition: ${from} → ${to}`);
   }
 }
-

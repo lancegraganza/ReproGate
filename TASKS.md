@@ -33,3 +33,6 @@
 - [x] cron-job.org scheduler instructions with bearer-header protection
 - [x] Read-only wallet interaction report with unique Stellar address counts
 - [x] Live automated cron run — verified a completed cron-job.org Testnet/Gemini/Google Form run with production durable database credentials
+- [x] Recoverable cron-driven Soroban finalization and Reward Vault payout verification
+- [x] Atomic finalization reservation, paginated event recovery, and settlement-gated Google Form delivery
+- [x] Varied automation emails, short natural feedback, and weighted 4–5 form ratings

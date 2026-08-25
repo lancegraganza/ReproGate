@@ -7,7 +7,11 @@ import { getDatabase, initializeDatabase } from "./database";
 export type AutomationRunStatus =
   | "RUNNING"
   | "SUBMISSION_PENDING"
+  | "AWAITING_FINALIZATION"
+  | "FINALIZATION_PENDING"
   | "FORM_PENDING"
+  | "FORM_SUBMITTING"
+  | "FORM_AMBIGUOUS"
   | "COMPLETED"
   | "FAILED";
 
@@ -18,6 +22,8 @@ export interface AutomationRun {
   wallet?: string;
   submissionId?: string;
   transactionHash?: string;
+  finalizationHash?: string;
+  finalizationXdr?: string;
   formPayload?: GoogleFormPayload;
   error?: string;
   createdAt: string;
@@ -39,6 +45,8 @@ function parseRun(row: Record<string, unknown>): AutomationRun {
     wallet: optional(row, "wallet"),
     submissionId: optional(row, "submission_id"),
     transactionHash: optional(row, "transaction_hash"),
+    finalizationHash: optional(row, "finalization_hash"),
+    finalizationXdr: optional(row, "finalization_xdr"),
     formPayload: payload ? JSON.parse(payload) as GoogleFormPayload : undefined,
     error: optional(row, "error"),
     createdAt: String(row.created_at),
@@ -91,7 +99,12 @@ export async function getAutomationRun(windowKey: string): Promise<AutomationRun
 
 export async function getLatestAutomationRun(
   taskId: string,
-  statuses: AutomationRunStatus[] = ["RUNNING", "SUBMISSION_PENDING", "FORM_PENDING"],
+  statuses: AutomationRunStatus[] = [
+    "RUNNING",
+    "SUBMISSION_PENDING",
+    "FINALIZATION_PENDING",
+    "FORM_PENDING",
+  ],
 ): Promise<AutomationRun | undefined> {
   if (!statuses.length) return undefined;
   await initializeDatabase();
@@ -101,12 +114,29 @@ export async function getLatestAutomationRun(
       WHERE task_id = ? AND status IN (${placeholders})
       ORDER BY CASE status
         WHEN 'FORM_PENDING' THEN 0
-        WHEN 'SUBMISSION_PENDING' THEN 1
-        ELSE 2
+        WHEN 'FINALIZATION_PENDING' THEN 1
+        WHEN 'SUBMISSION_PENDING' THEN 2
+        ELSE 3
       END, updated_at DESC LIMIT 1`,
     args: [taskId, ...statuses],
   });
   return result.rows[0] ? parseRun(result.rows[0] as Record<string, unknown>) : undefined;
+}
+
+export async function listAutomationRuns(
+  taskId: string,
+  statuses: AutomationRunStatus[],
+): Promise<AutomationRun[]> {
+  if (!statuses.length) return [];
+  await initializeDatabase();
+  const placeholders = statuses.map(() => "?").join(", ");
+  const result = await getDatabase().execute({
+    sql: `SELECT * FROM automated_reproduction_runs
+      WHERE task_id = ? AND status IN (${placeholders})
+      ORDER BY created_at ASC`,
+    args: [taskId, ...statuses],
+  });
+  return result.rows.map((row) => parseRun(row as Record<string, unknown>));
 }
 
 export async function startAutomationRun(windowKey: string, taskId: string): Promise<AutomationRun> {
@@ -118,7 +148,8 @@ export async function startAutomationRun(windowKey: string, taskId: string): Pro
       VALUES (?, ?, 'RUNNING', ?, ?)
       ON CONFLICT(window_key) DO UPDATE SET task_id = excluded.task_id,
         status = 'RUNNING', wallet = NULL, submission_id = NULL,
-        transaction_hash = NULL, form_payload_json = NULL, error = NULL,
+        transaction_hash = NULL, finalization_hash = NULL, finalization_xdr = NULL,
+        form_payload_json = NULL, error = NULL,
         form_submitted_at = NULL, updated_at = excluded.updated_at`,
     args: [windowKey, taskId, now, now],
   });
@@ -127,7 +158,7 @@ export async function startAutomationRun(windowKey: string, taskId: string): Pro
 
 export async function updateAutomationRun(
   windowKey: string,
-  patch: Partial<Pick<AutomationRun, "status" | "wallet" | "submissionId" | "transactionHash" | "formPayload" | "error" | "formSubmittedAt">>,
+  patch: Partial<Pick<AutomationRun, "status" | "wallet" | "submissionId" | "transactionHash" | "finalizationHash" | "finalizationXdr" | "formPayload" | "error" | "formSubmittedAt">>,
 ): Promise<AutomationRun> {
   await initializeDatabase();
   const fields: string[] = ["updated_at = ?"];
@@ -136,6 +167,8 @@ export async function updateAutomationRun(
   if (patch.wallet !== undefined) { fields.push("wallet = ?"); args.push(patch.wallet); }
   if (patch.submissionId !== undefined) { fields.push("submission_id = ?"); args.push(patch.submissionId); }
   if (patch.transactionHash !== undefined) { fields.push("transaction_hash = ?"); args.push(patch.transactionHash); }
+  if (patch.finalizationHash !== undefined) { fields.push("finalization_hash = ?"); args.push(patch.finalizationHash); }
+  if (patch.finalizationXdr !== undefined) { fields.push("finalization_xdr = ?"); args.push(patch.finalizationXdr); }
   if (patch.formPayload !== undefined) { fields.push("form_payload_json = ?"); args.push(JSON.stringify(patch.formPayload)); }
   if (patch.error !== undefined) { fields.push("error = ?"); args.push(patch.error.slice(0, 1_000)); }
   if (patch.formSubmittedAt !== undefined) { fields.push("form_submitted_at = ?"); args.push(patch.formSubmittedAt); }
@@ -143,6 +176,22 @@ export async function updateAutomationRun(
   await getDatabase().execute({
     sql: `UPDATE automated_reproduction_runs SET ${fields.join(", ")} WHERE window_key = ?`,
     args,
+  });
+  return (await getAutomationRun(windowKey))!;
+}
+
+export async function clearAutomationFinalizationEnvelope(
+  windowKey: string,
+  clearHash = false,
+): Promise<AutomationRun> {
+  await initializeDatabase();
+  await getDatabase().execute({
+    sql: `UPDATE automated_reproduction_runs
+      SET finalization_xdr = NULL,
+        finalization_hash = CASE WHEN ? = 1 THEN NULL ELSE finalization_hash END,
+        updated_at = ?
+      WHERE window_key = ?`,
+    args: [clearHash ? 1 : 0, new Date().toISOString(), windowKey],
   });
   return (await getAutomationRun(windowKey))!;
 }

@@ -3,6 +3,7 @@ export type TaskStatus =
   | "FUNDING"
   | "OPEN"
   | "VERIFYING"
+  | "FINALIZING"
   | "VERIFIED"
   | "EXPIRED"
   | "CANCELLED"

@@ -1,7 +1,7 @@
 import "server-only";
 
 import { Buffer } from "buffer";
-import { rpc, scValToNative } from "@stellar/stellar-sdk";
+import { rpc, scValToNative, TransactionBuilder } from "@stellar/stellar-sdk";
 import { Client as RegistryClient } from "./generated/repro-task-registry/src";
 import { Client as VaultClient } from "./generated/reward-vault/src";
 import type { ReproTask } from "@/types/domain";
@@ -9,6 +9,62 @@ import { requireContractIds, stellarConfig } from "./config";
 
 function taskIdBuffer(task: ReproTask): Buffer {
   return Buffer.from(task.taskHash, "hex");
+}
+
+type TaskTransactionKind = "FUND" | "REGISTER" | "FINALIZE" | "REFUND";
+
+function expectedTaskEvent(kind: TaskTransactionKind) {
+  const ids = requireContractIds();
+  return {
+    FUND: { contractId: ids.vault, names: ["reward_funded"] },
+    REGISTER: { contractId: ids.registry, names: ["task_registered"] },
+    FINALIZE: {
+      contractId: ids.registry,
+      names: ["task_verified", "task_completed"],
+    },
+    REFUND: { contractId: ids.registry, names: ["task_expired"] },
+  }[kind];
+}
+
+function eventMatchesTask(
+  event: { topic: Array<Parameters<typeof scValToNative>[0]> },
+  task: ReproTask,
+  names: string[],
+): boolean {
+  const topic = event.topic.map((value) => scValToNative(value));
+  const eventName = typeof topic[0] === "string" ? topic[0] : "";
+  const eventTask =
+    topic[1] instanceof Uint8Array
+      ? Buffer.from(topic[1]).toString("hex")
+      : undefined;
+  return names.includes(eventName) && eventTask === task.taskHash;
+}
+
+async function contractEventsAtLedger(
+  server: rpc.Server,
+  contractId: string,
+  ledger: number,
+) {
+  const filters = [{ type: "contract" as const, contractIds: [contractId] }];
+  const events: Awaited<ReturnType<rpc.Server["getEvents"]>>["events"] = [];
+  let cursor: string | undefined;
+  for (let page = 0; page < 50; page += 1) {
+    const response = await server.getEvents(
+      cursor
+        ? { cursor, filters, limit: 100 }
+        : { startLedger: ledger, endLedger: ledger, filters, limit: 100 },
+    );
+    events.push(...response.events.filter((event) => event.ledger === ledger));
+    if (
+      response.events.length < 100 ||
+      response.cursor === cursor ||
+      response.events.some((event) => event.ledger > ledger)
+    ) {
+      break;
+    }
+    cursor = response.cursor;
+  }
+  return events;
 }
 
 export async function confirmContractTransaction(hash: string): Promise<number> {
@@ -23,37 +79,105 @@ export async function confirmContractTransaction(hash: string): Promise<number> 
   return response.ledger;
 }
 
+export class SignedContractTransactionExpiredError extends Error {}
+
+export async function submitSignedContractTransaction(
+  signedXdr: string,
+  expectedHash: string,
+): Promise<number> {
+  const transaction = TransactionBuilder.fromXdr(
+    signedXdr,
+    stellarConfig.networkPassphrase,
+  );
+  const actualHash = Buffer.from(transaction.hash()).toString("hex");
+  if (actualHash !== expectedHash) {
+    throw new Error("Stored finalization envelope does not match its transaction hash.");
+  }
+  const server = new rpc.Server(stellarConfig.rpcUrl);
+  const existing = await server.getTransaction(expectedHash);
+  if (existing.status === "SUCCESS") return existing.ledger;
+  if (existing.status === "FAILED") {
+    throw new Error("Soroban finalization failed on-chain.");
+  }
+  const maxTime = "timeBounds" in transaction
+    ? transaction.timeBounds?.maxTime
+    : undefined;
+  if (maxTime && BigInt(maxTime) <= BigInt(Math.floor(Date.now() / 1_000))) {
+    throw new SignedContractTransactionExpiredError(
+      "The checkpointed Soroban finalization envelope expired before submission.",
+    );
+  }
+  const submitted = await server.sendTransaction(transaction);
+  if (submitted.status === "ERROR") {
+    throw new Error("Soroban RPC rejected the signed finalization transaction.");
+  }
+  for (let attempt = 0; attempt < 60; attempt += 1) {
+    const response = await server.getTransaction(expectedHash);
+    if (response.status === "SUCCESS") return response.ledger;
+    if (response.status === "FAILED") {
+      throw new Error("Soroban finalization failed on-chain.");
+    }
+    await new Promise((resolve) => setTimeout(resolve, 1_000));
+  }
+  throw new Error("Soroban finalization was submitted but confirmation timed out.");
+}
+
 export async function verifyTaskTransactionEvent(
   task: ReproTask,
-  kind: "FUND" | "REGISTER" | "FINALIZE" | "REFUND",
+  kind: TaskTransactionKind,
   hash: string,
   ledger: number,
 ): Promise<void> {
-  const ids = requireContractIds();
-  const expected = {
-    FUND: { contractId: ids.vault, names: ["reward_funded"] },
-    REGISTER: { contractId: ids.registry, names: ["task_registered"] },
-    FINALIZE: { contractId: ids.registry, names: ["task_verified", "task_completed"] },
-    REFUND: { contractId: ids.registry, names: ["task_expired"] },
-  }[kind];
+  const expected = expectedTaskEvent(kind);
   const server = new rpc.Server(stellarConfig.rpcUrl);
-  const response = await server.getEvents({
-    startLedger: ledger,
-    filters: [{ type: "contract", contractIds: [expected.contractId] }],
-    limit: 100,
-  });
-  const matches = response.events.some((event) => {
-    if (event.ledger !== ledger || event.txHash !== hash) return false;
+  const events = await contractEventsAtLedger(server, expected.contractId, ledger);
+  const matchedNames = new Set<string>();
+  for (const event of events) {
+    if (event.ledger !== ledger || event.txHash !== hash) continue;
+    if (!eventMatchesTask(event, task, expected.names)) continue;
     const topic = event.topic.map((value) => scValToNative(value));
-    const eventName = typeof topic[0] === "string" ? topic[0] : "";
-    const eventTask = topic[1] instanceof Uint8Array
-      ? Buffer.from(topic[1]).toString("hex")
-      : undefined;
-    return expected.names.includes(eventName) && eventTask === task.taskHash;
-  });
-  if (!matches) {
+    if (typeof topic[0] === "string") matchedNames.add(topic[0]);
+  }
+  if (!expected.names.every((name) => matchedNames.has(name))) {
     throw new Error("Transaction does not contain the expected contract event for this task.");
   }
+}
+
+export async function findTaskTransactionEvent(
+  task: ReproTask,
+  kind: TaskTransactionKind,
+): Promise<{ hash: string; ledger: number } | undefined> {
+  const expected = expectedTaskEvent(kind);
+  const server = new rpc.Server(stellarConfig.rpcUrl);
+  const latest = await server.getLatestLedger();
+  const filters = [
+    { type: "contract" as const, contractIds: [expected.contractId] },
+  ];
+  let cursor: string | undefined;
+  let match: { hash: string; ledger: number } | undefined;
+  for (let page = 0; page < 50; page += 1) {
+    const response = await server.getEvents(
+      cursor
+        ? { cursor, filters, limit: 100 }
+        : {
+            startLedger: Math.max(latest.sequence - 10_000, 1),
+            filters,
+            limit: 100,
+          },
+    );
+    for (const event of response.events) {
+      if (
+        event.txHash &&
+        eventMatchesTask(event, task, expected.names) &&
+        (!match || event.ledger >= match.ledger)
+      ) {
+        match = { hash: event.txHash, ledger: event.ledger };
+      }
+    }
+    if (response.events.length < 100 || response.cursor === cursor) break;
+    cursor = response.cursor;
+  }
+  return match;
 }
 
 export async function verifyFundedReward(task: ReproTask): Promise<void> {
@@ -115,4 +239,83 @@ export async function verifyFinalizedTask(task: ReproTask): Promise<"VERIFIED" |
   }
   if (onChain.state.tag === "Expired") return "EXPIRED";
   throw new Error("Task transaction is confirmed but the registry state is not final.");
+}
+
+export async function verifyRewardPayouts(
+  task: ReproTask,
+  hash: string,
+  ledger: number,
+): Promise<void> {
+  if (!task.verification?.thresholdReached || task.verification.acceptedWallets.length === 0) {
+    throw new Error("Task does not have accepted contributors to verify.");
+  }
+  const { vault } = requireContractIds();
+  const client = new VaultClient({
+    contractId: vault,
+    rpcUrl: stellarConfig.rpcUrl,
+    networkPassphrase: stellarConfig.networkPassphrase,
+  });
+  const rewardTransaction = await client.get_reward({
+    task_id: taskIdBuffer(task),
+  });
+  const reward = rewardTransaction.result.unwrap();
+  if (
+    reward.state.tag !== "Completed" ||
+    !reward.registered ||
+    reward.maintainer !== task.maintainerWallet ||
+    reward.amount !== BigInt(task.rewardStroops)
+  ) {
+    throw new Error("Reward Vault did not complete the expected task payout.");
+  }
+  for (const contributor of task.verification.acceptedWallets) {
+    const paid = await client.is_paid({
+      task_id: taskIdBuffer(task),
+      contributor,
+    });
+    if (!paid.result) {
+      throw new Error(`Reward Vault did not record payout for ${contributor}.`);
+    }
+  }
+
+  const server = new rpc.Server(stellarConfig.rpcUrl);
+  const events = await contractEventsAtLedger(server, vault, ledger);
+  const taskEvents = events.filter((event) => {
+    if (event.ledger !== ledger || event.txHash !== hash) return false;
+    const topic = event.topic.map((value) => scValToNative(value));
+    return (
+      topic[1] instanceof Uint8Array &&
+      Buffer.from(topic[1]).toString("hex") === task.taskHash
+    );
+  });
+  const paidAmounts = new Map<string, bigint>();
+  let completedTotal: bigint | undefined;
+  for (const event of taskEvents) {
+    const topic = event.topic.map((value) => scValToNative(value));
+    const value = scValToNative(event.value) as {
+      amount?: bigint;
+      total?: bigint;
+    };
+    if (topic[0] === "contributor_paid" && typeof topic[2] === "string") {
+      if (typeof value.amount !== "bigint") {
+        throw new Error("Reward Vault payout event is missing its amount.");
+      }
+      paidAmounts.set(topic[2], value.amount);
+    }
+    if (topic[0] === "reward_completed" && typeof value.total === "bigint") {
+      completedTotal = value.total;
+    }
+  }
+  const contributors = task.verification.acceptedWallets;
+  const total = BigInt(task.rewardStroops);
+  const base = total / BigInt(contributors.length);
+  const remainder = total % BigInt(contributors.length);
+  for (const [index, contributor] of contributors.entries()) {
+    const expected = base + (BigInt(index) < remainder ? 1n : 0n);
+    if (paidAmounts.get(contributor) !== expected) {
+      throw new Error(`Reward Vault payout event did not match ${contributor}.`);
+    }
+  }
+  if (paidAmounts.size !== contributors.length || completedTotal !== total) {
+    throw new Error("Reward Vault completion events do not match the expected payout.");
+  }
 }

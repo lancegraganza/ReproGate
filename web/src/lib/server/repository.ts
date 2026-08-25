@@ -239,7 +239,8 @@ export async function createSubmission(
         id, task_id, wallet, verdict, environment_json, reproduction_steps, relevant_logs,
         notes, minimal_reproduction_url, commit_hash, evidence_hash, normalized_environment_key,
         eligible, suspicious_reason, chain_status, created_at
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      ) SELECT ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?
+        FROM tasks WHERE id = ? AND status IN ('OPEN', 'VERIFYING')`,
       args: [
         id,
         taskId,
@@ -257,10 +258,14 @@ export async function createSubmission(
         reason ?? null,
         chainStatus,
         createdAt,
+        taskId,
       ],
     });
   try {
-    await insertSubmission(eligible, storedReason);
+    const inserted = await insertSubmission(eligible, storedReason);
+    if (Number(inserted.rowsAffected) !== 1) {
+      throw new Error("This task is not accepting evidence.");
+    }
   } catch (error) {
     const message = error instanceof Error ? error.message.toLowerCase() : "";
     if (message.includes("unique") || message.includes("constraint")) {
@@ -269,9 +274,12 @@ export async function createSubmission(
         args: [taskId, input.wallet],
       });
       if (duplicateWallet.rows.length) throw new DuplicateSubmissionError();
-      await insertSubmission(false, chainStatus === "PENDING"
+      const inserted = await insertSubmission(false, chainStatus === "PENDING"
         ? PENDING_CHAIN_REASON
         : "Evidence duplicates an existing eligible submission.");
+      if (Number(inserted.rowsAffected) !== 1) {
+        throw new Error("This task is not accepting evidence.");
+      }
     } else {
       throw error;
     }
@@ -340,6 +348,9 @@ export async function confirmSubmissionTransaction(
   const current = task.submissions.find((submission) => submission.id === submissionId);
   if (!current) throw new Error("Pending evidence submission was not found.");
   if (current.chainStatus === "CONFIRMED") return { submission: current, verification: verifySubmissions(task.submissions, task.threshold, task.deadline) };
+  if (task.status === "FINALIZING" || task.status === "VERIFIED") {
+    throw new Error("This task has frozen evidence while finalization is in progress.");
+  }
   if (current.chainStatus !== "PENDING") throw new Error("Evidence submission is not awaiting confirmation.");
 
   const candidate = {
@@ -394,6 +405,37 @@ export async function confirmSubmissionTransaction(
     args: [JSON.stringify(verification), nextStatus, now, taskId],
   });
   return { submission: submissions.find((submission) => submission.id === submissionId)!, verification };
+}
+
+export async function reserveTaskFinalization(taskId: string): Promise<TaskDetail> {
+  await initializeDatabase();
+  const task = await getTask(taskId);
+  if (!task) throw new Error("Task not found.");
+  if (
+    task.status === "FINALIZING" &&
+    task.verification?.thresholdReached
+  ) {
+    return task;
+  }
+  if (task.status !== "VERIFYING" || !task.verification?.thresholdReached) {
+    throw new Error("Task is not ready for finalization.");
+  }
+  const verificationJson = JSON.stringify(task.verification);
+  const reserved = await getDatabase().execute({
+    sql: `UPDATE tasks SET status = 'FINALIZING', updated_at = ?
+      WHERE id = ? AND status = 'VERIFYING' AND verification_json = ?
+      AND NOT EXISTS (
+        SELECT 1 FROM submissions
+        WHERE task_id = ? AND chain_status = 'PENDING'
+      )`,
+    args: [new Date().toISOString(), taskId, verificationJson, taskId],
+  });
+  if (Number(reserved.rowsAffected) !== 1) {
+    throw new Error(
+      "Task finalization could not be reserved because evidence is still pending or the verification snapshot changed.",
+    );
+  }
+  return (await getTask(taskId))!;
 }
 
 export async function failSubmissionTransaction(submissionId: string, taskId: string, reason: string): Promise<void> {

@@ -10,7 +10,7 @@ ReproGate turns uncertain public GitHub bug reports into independently confirmed
 - [Registry invocation](https://stellar.expert/explorer/testnet/tx/06b624053e8c2311028e3b6c69cc11a3f781414abbb8de3687c7ddb6440cb895)
 - [Atomic finalization and two 1 XLM payouts](https://stellar.expert/explorer/testnet/tx/52223943fc94b5648d802c6d9b52dc194fec801d57d51e8ab8082e3ae21f81c1)
 - [Classic 0.1 XLM transfer](https://stellar.expert/explorer/testnet/tx/737c0709f0713275f29f3cde14919cf9967a3108b11199235ffe92b543419072)
-- 16 Soroban tests, 44 frontend/domain/integration tests, 4 desktop/mobile browser tests, lint, typecheck, and build
+- 16 Soroban tests, 59 frontend/domain/integration tests, 4 desktop/mobile browser tests, lint, typecheck, and build
 - All hashes and network facts: [NETWORKS.md](NETWORKS.md)
 
 ## Product
@@ -56,7 +56,7 @@ pnpm dev
 Public issue import needs no GitHub login. `GITHUB_TOKEN` is optional and only needed for higher limits or posting. Local development uses `web/.data/reprogate.db`; Vercel requires remote durable libSQL.
 All recurring jobs are external cron-job.org jobs; no Vercel cron declarations are shipped, so Hobby deployments do not trigger Vercel's paid-cron validation. Configure a random `CRON_SECRET` so the protected endpoints reject public invocations.
 Hosted event polling uses cron-job.org to call `/api/stellar/sync` every five minutes (`*/5 * * * *`).
-Automated Testnet reproduction uses cron-job.org to call `/api/cron/reproduce` every 30 minutes (`*/30 * * * *`). It creates and Friendbot-funds an ephemeral Testnet wallet, asks Gemini for schema-validated evidence, submits through the same wallet-authenticated evidence service, sends a confirmed XLM payment, records the transaction on the submission/history path, and only then posts the corresponding Google Form response. The wallet secret is never persisted. Neither route is registered as a Vercel cron, preventing duplicate schedulers.
+Automated Testnet reproduction uses cron-job.org to call `/api/cron/reproduce` every 30 minutes (`*/30 * * * *`). It creates and Friendbot-funds an ephemeral Testnet wallet, asks Gemini for schema-validated evidence, reuses a stable normalized environment while randomizing observations, submits through the same wallet-authenticated evidence service, and sends a confirmed XLM payment. When the confirmation threshold is reached, the app freezes the accepted evidence snapshot and a dedicated server-side Testnet maintainer signs the real Registry finalization; the Registry calls the Reward Vault atomically, accepted wallets receive XLM, and the cron verifies contract events, final state, and every payout before posting any held Google Form responses. Contributor wallet secrets are never persisted. Neither route is registered as a Vercel cron, preventing duplicate schedulers.
 
 Configure two cron-job.org jobs with the deployed HTTPS URL, method `POST`, and the custom header `Authorization: Bearer <CRON_SECRET>`: `/api/stellar/sync` every five minutes (`*/5 * * * *`) and `/api/cron/reproduce` at minutes `0` and `30` every hour/day (`*/30 * * * *`). The reproduction route returns `202 Accepted` and continues the durable run in the server background, so the scheduler does not wait for Gemini, Testnet confirmation, or Google Forms. Keep the same `CRON_SECRET` in the deployed server environment; cron-job.org stores only the outbound scheduler header.
 
@@ -94,11 +94,12 @@ The script runs gates, deploys both contracts, configures references, regenerate
 | `CRON_SECRET` | required on Vercel for authenticated event polling and the cron-job.org reproduction request |
 | `GEMINI_API_KEY` | server-only key required by the automated reproduction cron |
 | `GEMINI_MODEL` | optional; defaults to `gemini-3.1-flash-lite` |
+| `CRON_MAINTAINER_SECRET` | server-only Testnet seed required for automatic finalization; its public key must equal the target task maintainer |
 | `CRON_REPRO_TASK_ID`, `CRON_EVIDENCE_AMOUNT_XLM`, `CRON_PAYMENT_DESTINATION` | optional automated Testnet run settings |
 | `GOOGLE_FORM_*` | optional public form endpoint/field overrides; defaults match the configured ReproGate feedback form |
 
 ## Security and deployment status
 
-Wallet secrets never enter the app. Mutations use single-use, non-transfer wallet-signed challenges with distributed rate limits. Contract callbacks are bound to the expected transaction event and full typed state. Mainnet is rejected. Arbitrary imported code is never executed.
+End-user wallet secrets never enter the app. The optional automation maintainer seed is Testnet-only, server-side, validated against the target task, and never persisted. Mutations use single-use, non-transfer wallet-signed challenges with distributed rate limits. Contract callbacks are bound to the expected transaction event and full typed state. Mainnet is rejected. Arbitrary imported code is never executed.
 
 Contracts and the full application lifecycle are live-verified on Testnet. Local Quickstart needs Docker, unavailable on this machine. Vercel additionally needs user-owned Vercel and durable libSQL credentials; the app intentionally refuses ephemeral Vercel storage.

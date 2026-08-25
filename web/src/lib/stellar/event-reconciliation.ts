@@ -32,35 +32,34 @@ const plans: Record<string, EventReconciliationPlan> = {
     status: "VERIFIED",
     transactionColumn: "finalization_tx",
     transactionKind: "FINALIZE",
-    allowedFrom: ["OPEN", "VERIFYING"],
+    allowedFrom: ["OPEN", "VERIFYING", "FINALIZING"],
   },
   task_completed: {
     status: "VERIFIED",
     transactionColumn: "finalization_tx",
     transactionKind: "FINALIZE",
-    allowedFrom: ["OPEN", "VERIFYING"],
+    allowedFrom: ["OPEN", "VERIFYING", "FINALIZING"],
   },
   reward_completed: {
     status: "VERIFIED",
     transactionColumn: "finalization_tx",
     transactionKind: "FINALIZE",
-    allowedFrom: ["OPEN", "VERIFYING"],
+    allowedFrom: ["OPEN", "VERIFYING", "FINALIZING"],
   },
   task_expired: {
     status: "EXPIRED",
     transactionColumn: "finalization_tx",
     transactionKind: "REFUND",
-    allowedFrom: ["OPEN", "VERIFYING"],
+    allowedFrom: ["OPEN", "VERIFYING", "FINALIZING"],
   },
   reward_refunded: {
     status: "EXPIRED",
     transactionColumn: "finalization_tx",
     transactionKind: "REFUND",
-    allowedFrom: ["OPEN", "VERIFYING"],
+    allowedFrom: ["OPEN", "VERIFYING", "FINALIZING"],
   },
 };
 
 export function planForContractEvent(eventType: string): EventReconciliationPlan | undefined {
   return plans[eventType];
 }
-

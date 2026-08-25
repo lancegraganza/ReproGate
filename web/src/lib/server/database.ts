@@ -138,6 +138,8 @@ export async function initializeDatabase(): Promise<void> {
             wallet TEXT,
             submission_id TEXT,
             transaction_hash TEXT,
+            finalization_hash TEXT,
+            finalization_xdr TEXT,
             form_payload_json TEXT,
             error TEXT,
             created_at TEXT NOT NULL,
@@ -151,6 +153,8 @@ export async function initializeDatabase(): Promise<void> {
         "ALTER TABLE submissions ADD COLUMN chain_status TEXT NOT NULL DEFAULT 'CONFIRMED'",
         "ALTER TABLE submissions ADD COLUMN transaction_hash TEXT",
         "ALTER TABLE submissions ADD COLUMN transaction_explorer_url TEXT",
+        "ALTER TABLE automated_reproduction_runs ADD COLUMN finalization_hash TEXT",
+        "ALTER TABLE automated_reproduction_runs ADD COLUMN finalization_xdr TEXT",
       ]) {
         try {
           await db.execute(statement);
