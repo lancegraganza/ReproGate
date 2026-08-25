@@ -1,6 +1,6 @@
 // @vitest-environment node
-import { describe, expect, it } from "vitest";
-import { randomizeEvidence, type GeneratedEvidence } from "./gemini-evidence";
+import { afterEach, describe, expect, it, vi } from "vitest";
+import { generateEvidence, randomizeEvidence, type GeneratedEvidence } from "./gemini-evidence";
 
 const generated: GeneratedEvidence = {
   verdict: "REPRODUCED",
@@ -26,5 +26,70 @@ describe("Gemini evidence randomization", () => {
     expect(first.environment).toEqual(generated.environment);
     expect(first.reproductionSteps).not.toBe(second.reproductionSteps);
     expect(first.relevantLogs).toContain("synthetic-trace");
+  });
+});
+
+describe("Gemini evidence generation", () => {
+  afterEach(() => {
+    vi.unstubAllEnvs();
+    vi.unstubAllGlobals();
+  });
+
+  it("requests and accepts the structured environment schema", async () => {
+    vi.stubEnv("GEMINI_API_KEY", "test-key");
+    const fetchMock = vi.fn().mockResolvedValue(new Response(JSON.stringify({
+      candidates: [{
+        content: {
+          parts: [{ text: JSON.stringify({
+            verdict: "REPRODUCED",
+            environment: {
+              operatingSystem: "Android 14",
+              runtime: "DeepSeek App",
+              runtimeVersion: "2.2.2",
+              packageManager: "mobile",
+              packageManagerVersion: "2.2.2",
+              dependencies: { model: "DeepSeek-LLM" },
+            },
+            reproductionSteps: "Open the app, send the reported prompt, and inspect the final response marker.",
+            relevantLogs: "Observed the closing output tag rendered at the end of the response.",
+            notes: "The result was consistent after reopening the app.",
+            googleFeedback: "The flow was clear and easy to follow.",
+          }) }],
+        },
+      }],
+    }), { status: 200, headers: { "Content-Type": "application/json" } }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    const result = await generateEvidence({
+      id: "task-id",
+      taskHash: "task-hash",
+      githubIssue: {
+        owner: "example",
+        repo: "project",
+        number: 1,
+        title: "Example issue",
+        body: "The app renders an extra marker.",
+        labels: [],
+        url: "https://github.com/example/project/issues/1",
+        author: "maintainer",
+      },
+      objective: "Reproduce the extra marker rendering issue.",
+      targetEnvironment: "Android 14",
+      reproductionNotes: "Use the mobile app and inspect the final response.",
+      threshold: 2,
+      deadline: "2099-01-01T00:00:00.000Z",
+      deadlinePassed: false,
+      rewardStroops: "1000000",
+      maintainerWallet: "G" + "A".repeat(55),
+      status: "OPEN",
+      createdAt: "2026-01-01T00:00:00.000Z",
+      updatedAt: "2026-01-01T00:00:00.000Z",
+      submissionCount: 0,
+    }, "seed");
+
+    expect(result.environment.dependencies).toEqual({ model: "DeepSeek-LLM" });
+    const requestBody = JSON.parse(fetchMock.mock.calls[0]?.[1]?.body as string);
+    expect(requestBody.generationConfig.responseJsonSchema.properties.environment.type).toBe("object");
+    expect(requestBody.generationConfig.responseJsonSchema.properties.environment.properties.dependencies.type).toBe("object");
   });
 });

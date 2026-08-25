@@ -22,6 +22,53 @@ const generatedEvidenceSchema = z.object({
 
 export type GeneratedEvidence = z.infer<typeof generatedEvidenceSchema>;
 
+// Gemini's JSON MIME type alone does not guarantee the shape expected by the
+// evidence validator. Keep this REST JSON Schema in sync with the required
+// fields above so the model cannot collapse `environment` into a free-form
+// string (which caused the first production cron run to fail validation).
+const generatedEvidenceResponseSchema = {
+  type: "object",
+  additionalProperties: false,
+  properties: {
+    verdict: { type: "string", enum: ["REPRODUCED"] },
+    environment: {
+      type: "object",
+      additionalProperties: false,
+      properties: {
+        operatingSystem: { type: "string" },
+        runtime: { type: "string" },
+        runtimeVersion: { type: "string" },
+        packageManager: { type: "string" },
+        packageManagerVersion: { type: "string" },
+        dependencies: {
+          type: "object",
+          additionalProperties: { type: "string" },
+        },
+      },
+      required: [
+        "operatingSystem",
+        "runtime",
+        "runtimeVersion",
+        "packageManager",
+        "packageManagerVersion",
+        "dependencies",
+      ],
+    },
+    reproductionSteps: { type: "string" },
+    relevantLogs: { type: "string" },
+    notes: { type: "string" },
+    googleFeedback: { type: "string" },
+  },
+  required: [
+    "verdict",
+    "environment",
+    "reproductionSteps",
+    "relevantLogs",
+    "notes",
+    "googleFeedback",
+  ],
+} as const;
+
 const reproductionVariations = [
   {
     step: "Repeat once after force-stopping and reopening the app.",
@@ -90,6 +137,8 @@ ${context}
 Requirements:
 - Return JSON only with exactly: verdict, environment, reproductionSteps, relevantLogs, notes, googleFeedback.
 - verdict must be REPRODUCED because this cron exercises the reproduce-evidence path.
+- environment must be an object with operatingSystem, runtime, runtimeVersion, packageManager, packageManagerVersion, and a dependencies object; never return environment as a string.
+- dependencies must be a JSON object whose keys are dependency names and whose values are version strings.
 - Keep the environment internally consistent with the actual issue. Prefer the mobile/device environment described in the issue when it is relevant; otherwise use a plausible current developer environment.
 - Make reproductionSteps concrete, ordered, and at least 30 characters. Make logs plausible but concise; do not invent secrets, credentials, private URLs, or an on-chain transaction.
 - Make notes useful and written in natural ESL-style technical English.
@@ -106,6 +155,7 @@ This is a synthetic testnet simulation. Do not claim that you personally ran cod
         contents: [{ role: "user", parts: [{ text: prompt }] }],
         generationConfig: {
           responseMimeType: "application/json",
+          responseJsonSchema: generatedEvidenceResponseSchema,
           temperature: 1.05,
           maxOutputTokens: 1_600,
           thinkingConfig: { thinkingLevel: "low" },
