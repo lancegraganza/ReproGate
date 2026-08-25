@@ -14,6 +14,7 @@ import { submitEvidence } from "./submissions";
 import {
   createAndFundTestnetWallet,
   sendEvidencePayment,
+  verifyTestnetTransaction,
 } from "./testnet-wallet";
 import { generateEvidence, randomizeEvidence } from "./gemini-evidence";
 import {
@@ -81,6 +82,7 @@ async function recoverPendingSubmission(
   const task = await getTask(run.taskId);
   if (!task)
     throw new Error("Target task not found while recovering the cron run.");
+  await verifyTestnetTransaction(run.transactionHash, run.wallet);
   const explorerUrl = explorerTransactionUrl(run.transactionHash);
   await attachSubmissionTransaction(
     run.submissionId,

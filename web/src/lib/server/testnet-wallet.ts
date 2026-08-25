@@ -62,7 +62,13 @@ export async function sendEvidencePayment(
   let lastError: unknown;
   for (let attempt = 0; attempt < 30; attempt += 1) {
     try {
-      await server.transactions().transaction(hash).call();
+      const confirmed = await server.transactions().transaction(hash).call();
+      if (!confirmed.successful) {
+        throw new Error("Testnet evidence payment was not successful on-chain.");
+      }
+      if (confirmed.source_account !== keypair.publicKey()) {
+        throw new Error("Testnet evidence payment source did not match the generated wallet.");
+      }
       return { hash, explorerUrl: explorerTransactionUrl(hash) };
     } catch (error) {
       lastError = error;
@@ -70,4 +76,22 @@ export async function sendEvidencePayment(
     }
   }
   throw new Error(`Testnet transaction was submitted but confirmation could not be read: ${String(lastError)}`);
+}
+
+export async function verifyTestnetTransaction(
+  hash: string,
+  sourceAccount: string,
+): Promise<void> {
+  if (!hash.trim()) throw new Error("A Testnet transaction hash is required.");
+  if (!StrKey.isValidEd25519PublicKey(sourceAccount)) {
+    throw new Error("Invalid generated Testnet wallet address.");
+  }
+  const server = new Horizon.Server(stellarConfig.horizonUrl);
+  const transaction = await server.transactions().transaction(hash).call();
+  if (!transaction.successful) {
+    throw new Error("The recorded Testnet transaction did not succeed on-chain.");
+  }
+  if (transaction.source_account !== sourceAccount) {
+    throw new Error("The recorded Testnet transaction was not signed by the generated wallet.");
+  }
 }
