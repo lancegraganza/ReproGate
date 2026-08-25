@@ -70,6 +70,8 @@ pnpm test:e2e
 
 Individual commands: `pnpm lint`, `pnpm typecheck`, `pnpm test`, `pnpm build`, `cargo test --workspace`, and `stellar contract build`.
 
+To list every unique Stellar wallet observed by the application (maintainers, submissions, wallet challenges, automated runs, and indexed contract-event payloads), run `node scripts/list-wallets.mjs`. Use `--json` for machine-readable output or `--database-url file:<path>` to inspect a local SQLite database without changing it.
+
 ## Testnet deployment
 
 ```powershell

@@ -49,6 +49,11 @@
 - cron-job.org is the sole scheduler for recurring workflows; Vercel only hosts the protected endpoints. This avoids two schedulers creating duplicate sync work, Testnet wallets, and submissions.
 - The endpoint acknowledges cron-job.org with `202` and runs the durable workflow in Next's `after()` phase, preventing the external scheduler's short request timeout from interrupting Testnet confirmation.
 
+## 2026-08-25 — Wallet reporting is application-observed and read-only
+
+- `scripts/list-wallets.mjs` reports unique valid Stellar public keys from maintainer tasks, submissions, wallet challenges, automated reproduction runs, and indexed event payloads.
+- The report intentionally does not infer wallets from unindexed chain history and never writes to the local or remote libSQL database.
+
 ## 2026-08-24 — Mainnet disabled in code
 
 - Only `local` and `testnet` are accepted. `mainnet` and `public` throw.
