@@ -44,7 +44,7 @@ import {
   validateAutomationMaintainer,
 } from "./cron-finalization";
 
-export const DEFAULT_CRON_TASK_ID = "6c2754ab-4201-42b6-87c4-8dc309bf31f1";
+export const DEFAULT_CRON_TASK_ID = "3b9e0954-a1c1-4765-a7e0-148a59021067";
 
 function targetTaskId(): string {
   return process.env.CRON_REPRO_TASK_ID?.trim() || DEFAULT_CRON_TASK_ID;
@@ -156,15 +156,14 @@ async function finishHeldForms(
       });
     }
   }
-  const uncertain = await listAutomationRuns(taskId, [
-    "FORM_AMBIGUOUS",
-  ]);
+  const uncertain = await listAutomationRuns(taskId, ["FORM_AMBIGUOUS"]);
   for (const run of uncertain) {
     if (!failures.some((failure) => failure.window === run.windowKey)) {
       failures.push({
         window: run.windowKey,
         status: "FORM_AMBIGUOUS",
-        error: run.error ?? "[FORM] Google Form delivery requires an outcome audit.",
+        error:
+          run.error ?? "[FORM] Google Form delivery requires an outcome audit.",
       });
     }
   }
@@ -188,7 +187,9 @@ async function finishPendingFinalization(
 ): Promise<Record<string, unknown>> {
   let task = await getTask(run.taskId);
   if (!task) {
-    throw new Error("[FINALIZATION] Target task not found while finalizing the cron run.");
+    throw new Error(
+      "[FINALIZATION] Target task not found while finalizing the cron run.",
+    );
   }
   if (task.status === "VERIFYING") {
     validateAutomationMaintainer(task);
@@ -242,7 +243,9 @@ async function finishConfirmedSubmission(
 ): Promise<Record<string, unknown>> {
   const task = await getTask(run.taskId);
   if (!task) {
-    throw new Error("[PAYMENT] Target task not found after evidence confirmation.");
+    throw new Error(
+      "[PAYMENT] Target task not found after evidence confirmation.",
+    );
   }
   if (run.formPayload) {
     return finishPendingForm(run);
@@ -268,15 +271,13 @@ async function finishConfirmedSubmission(
 async function recoverPendingSubmission(
   run: AutomationRun,
 ): Promise<Record<string, unknown> | undefined> {
-  if (
-    !run.submissionId ||
-    !run.wallet ||
-    !run.transactionHash
-  )
+  if (!run.submissionId || !run.wallet || !run.transactionHash)
     return undefined;
   const task = await getTask(run.taskId);
   if (!task)
-    throw new Error("[PAYMENT] Target task not found while recovering the cron run.");
+    throw new Error(
+      "[PAYMENT] Target task not found while recovering the cron run.",
+    );
   await verifyTestnetTransaction(run.transactionHash, run.wallet);
   const explorerUrl = explorerTransactionUrl(run.transactionHash);
   await attachSubmissionTransaction(
@@ -325,9 +326,13 @@ async function continueExistingRun(
         return finishHeldForms(run.taskId, task.finalizationTx, run.windowKey);
       }
       if (run.formPayload) return finishPendingForm(run);
-      return updateAutomationRun(run.windowKey, { status: "COMPLETED", error: "" }).then(
-        (completed) => ({ status: "completed", window: completed.windowKey }),
-      );
+      return updateAutomationRun(run.windowKey, {
+        status: "COMPLETED",
+        error: "",
+      }).then((completed) => ({
+        status: "completed",
+        window: completed.windowKey,
+      }));
     }
 
     case "FINALIZING":
@@ -371,7 +376,8 @@ async function continueExistingRun(
     default:
       await updateAutomationRun(run.windowKey, {
         status: "FAILED",
-        error: "[STARTED] The automated run stopped before evidence submission was created.",
+        error:
+          "[STARTED] The automated run stopped before evidence submission was created.",
       });
       return undefined;
   }
@@ -420,10 +426,7 @@ export async function runAutomatedReproduction(): Promise<
 
     const task = await getTask(taskId);
     if (!task) throw new Error("Target reproduction task was not found.");
-    if (
-      task.status === "EXPIRED" ||
-      task.status === "DRAFT"
-    ) {
+    if (task.status === "EXPIRED" || task.status === "DRAFT") {
       return {
         status: "skipped",
         reason: `Target task is ${task.status}, not accepting evidence.`,
@@ -517,7 +520,9 @@ export async function runAutomatedReproduction(): Promise<
     );
     const latest = await getAutomationRun(windowKey);
     if (!latest)
-      throw new Error("[PAYMENT] Cron run disappeared after transaction confirmation.");
+      throw new Error(
+        "[PAYMENT] Cron run disappeared after transaction confirmation.",
+      );
     return finishConfirmedSubmission(latest);
   } catch (error) {
     if (recoveryRun) {
@@ -530,11 +535,12 @@ export async function runAutomatedReproduction(): Promise<
           current?.status === "FORM_SUBMITTED" ||
           current?.status === "FORM_AMBIGUOUS"
             ? current.status
-            : current?.status === "FINALIZING" || current?.status === "FINALIZATION_PENDING"
+            : current?.status === "FINALIZING" ||
+                current?.status === "FINALIZATION_PENDING"
               ? current.status
-            : current?.status === "FINALIZED"
-              ? "FINALIZED"
-            : "EVIDENCE_SUBMITTED",
+              : current?.status === "FINALIZED"
+                ? "FINALIZED"
+                : "EVIDENCE_SUBMITTED",
         error: error instanceof Error ? error.message : String(error),
       }).catch(() => undefined);
       throw error;

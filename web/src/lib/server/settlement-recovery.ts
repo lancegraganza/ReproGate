@@ -8,22 +8,16 @@ import {
   clearAutomationFinalizationEnvelope,
   type AutomationRun,
 } from "./automation-runs";
-import {
-  getTask,
-  reserveTaskFinalization,
-} from "./repository";
+import { getTask, reserveTaskFinalization } from "./repository";
 import {
   finalizeTaskForAutomation,
   recoverAutomatedFinalization,
   validateAutomationMaintainer,
 } from "./cron-finalization";
-import {
-  GoogleFormSubmissionError,
-  submitGoogleForm,
-} from "./google-form";
+import { GoogleFormSubmissionError, submitGoogleForm } from "./google-form";
 import { stellarConfig } from "@/lib/stellar/config";
 
-const DEFAULT_TASK_ID = "6c2754ab-4201-42b6-87c4-8dc309bf31f1";
+const DEFAULT_TASK_ID = "3b9e0954-a1c1-4765-a7e0-148a59021067";
 
 function targetTaskId(): string {
   return process.env.CRON_REPRO_TASK_ID?.trim() || DEFAULT_TASK_ID;
@@ -37,10 +31,16 @@ async function settleForm(
   run: AutomationRun,
 ): Promise<{ window: string; status: string; error?: string }> {
   if (!run.formPayload) {
-    await updateAutomationRun(run.windowKey, { status: "COMPLETED", error: "" });
+    await updateAutomationRun(run.windowKey, {
+      status: "COMPLETED",
+      error: "",
+    });
     return { window: run.windowKey, status: "COMPLETED" };
   }
-  await updateAutomationRun(run.windowKey, { status: "FORM_PENDING", error: "" });
+  await updateAutomationRun(run.windowKey, {
+    status: "FORM_PENDING",
+    error: "",
+  });
   try {
     await submitGoogleForm(run.formPayload);
   } catch (error) {
@@ -76,7 +76,8 @@ async function settleHeldForms(
     "FINALIZED",
     "FORM_PENDING",
   ]);
-  const outcomes: Array<{ window: string; status: string; error?: string }> = [];
+  const outcomes: Array<{ window: string; status: string; error?: string }> =
+    [];
   for (const run of held) {
     await updateAutomationRun(run.windowKey, { finalizationHash });
     outcomes.push(await settleForm(run));
@@ -88,9 +89,7 @@ async function settleHeldForms(
 // Soroban finalization recovery
 // ---------------------------------------------------------------------------
 
-async function settleFinalization(
-  run: AutomationRun,
-): Promise<string> {
+async function settleFinalization(run: AutomationRun): Promise<string> {
   let task = await getTask(run.taskId);
   if (!task) throw new Error("[SETTLE:FINALIZATION] Target task not found.");
 
@@ -158,7 +157,10 @@ export async function runSettlementRecovery(): Promise<
   const lockKey = `reprogate-settlement:${taskId}`;
   const lockToken = await acquireCronLock(lockKey, 5 * 60_000);
   if (!lockToken) {
-    return { status: "skipped", reason: "A settlement recovery is already running." };
+    return {
+      status: "skipped",
+      reason: "A settlement recovery is already running.",
+    };
   }
 
   try {
@@ -167,8 +169,13 @@ export async function runSettlementRecovery(): Promise<
     if (!task) return { status: "idle", reason: "Target task not found." };
     if (task.status === "VERIFIED" && task.finalizationTx) {
       const outcomes = await settleHeldForms(taskId, task.finalizationTx);
-      if (outcomes.length === 0) return { status: "idle", reason: "No pending runs to settle." };
-      return { status: "settled_forms", finalizationHash: task.finalizationTx, runs: outcomes };
+      if (outcomes.length === 0)
+        return { status: "idle", reason: "No pending runs to settle." };
+      return {
+        status: "settled_forms",
+        finalizationHash: task.finalizationTx,
+        runs: outcomes,
+      };
     }
 
     // 2. Find the highest-priority stuck run.
@@ -183,12 +190,16 @@ export async function runSettlementRecovery(): Promise<
       const waiting = await listAutomationRuns(taskId, ["PAYMENT_CONFIRMED"]);
       if (waiting.length === 0) return { status: "idle" };
       // Task is not yet verified but runs are waiting — nothing to recover.
-      return { status: "idle", reason: "Waiting for more evidence before finalization." };
+      return {
+        status: "idle",
+        reason: "Waiting for more evidence before finalization.",
+      };
     }
 
     // Process each stuck run in priority order.
     const finalizationRuns = stuck.filter(
-      (run) => run.status === "FINALIZATION_PENDING" || run.status === "FINALIZING",
+      (run) =>
+        run.status === "FINALIZATION_PENDING" || run.status === "FINALIZING",
     );
     const finalizedRuns = stuck.filter((run) => run.status === "FINALIZED");
     const formRuns = stuck.filter((run) => run.status === "FORM_PENDING");
@@ -202,7 +213,9 @@ export async function runSettlementRecovery(): Promise<
         finalizationHash = await settleFinalization(run);
       } catch (error) {
         const message = `[SETTLE:FINALIZATION] ${error instanceof Error ? error.message : String(error)}`;
-        await updateAutomationRun(run.windowKey, { error: message }).catch(() => undefined);
+        await updateAutomationRun(run.windowKey, { error: message }).catch(
+          () => undefined,
+        );
         throw error;
       }
     }
@@ -215,10 +228,17 @@ export async function runSettlementRecovery(): Promise<
 
     // 2c. Handle runs that just need form delivery.
     if (finalizedRuns.length > 0 || formRuns.length > 0) {
-      const fHash = finalizedRuns[0]?.finalizationHash ?? formRuns[0]?.finalizationHash ?? "";
+      const fHash =
+        finalizedRuns[0]?.finalizationHash ??
+        formRuns[0]?.finalizationHash ??
+        "";
       const outcomes = await settleHeldForms(taskId, fHash);
       if (outcomes.length > 0) {
-        return { status: "settled_forms", finalizationHash: fHash, runs: outcomes };
+        return {
+          status: "settled_forms",
+          finalizationHash: fHash,
+          runs: outcomes,
+        };
       }
     }
 
