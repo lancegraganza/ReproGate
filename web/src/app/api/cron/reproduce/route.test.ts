@@ -1,6 +1,10 @@
 // @vitest-environment node
 import { afterEach, describe, expect, it, vi } from "vitest";
 
+vi.mock("next/server", () => ({
+  after: (task: () => Promise<void>) => { void task(); },
+}));
+
 vi.mock("@/lib/server/reproduction-cron", () => ({
   runAutomatedReproduction: vi.fn().mockResolvedValue({ status: "completed" }),
 }));
@@ -21,7 +25,7 @@ describe("automated reproduction cron authorization", () => {
     const response = await GET(new Request("https://example.test/api/cron/reproduce", {
       headers: { Authorization: "Bearer cron-secret" },
     }));
-    expect(response.status).toBe(200);
-    await expect(response.json()).resolves.toMatchObject({ status: "completed" });
+    expect(response.status).toBe(202);
+    await expect(response.json()).resolves.toMatchObject({ status: "accepted", scheduler: "cron-job.org" });
   });
 });

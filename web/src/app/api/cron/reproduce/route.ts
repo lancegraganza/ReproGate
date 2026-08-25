@@ -1,5 +1,5 @@
-import { errorResponse } from "@/lib/server/http";
 import { runAutomatedReproduction } from "@/lib/server/reproduction-cron";
+import { after } from "next/server";
 
 export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
@@ -17,11 +17,14 @@ function authorize(request: Request): Response | undefined {
 async function handle(request: Request): Promise<Response> {
   const denied = authorize(request);
   if (denied) return denied;
-  try {
-    return Response.json(await runAutomatedReproduction());
-  } catch (error) {
-    return errorResponse(error);
-  }
+  after(async () => {
+    try {
+      await runAutomatedReproduction();
+    } catch (error) {
+      console.error("Automated reproduction cron failed", error);
+    }
+  });
+  return Response.json({ status: "accepted", scheduler: "cron-job.org" }, { status: 202 });
 }
 
 export async function GET(request: Request) {

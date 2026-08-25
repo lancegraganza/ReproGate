@@ -55,7 +55,9 @@ pnpm dev
 
 Public issue import needs no GitHub login. `GITHUB_TOKEN` is optional and only needed for higher limits or posting. Local development uses `web/.data/reprogate.db`; Vercel requires remote durable libSQL.
 Hosted event polling uses the five-minute Vercel cron in `web/vercel.json`; configure a random `CRON_SECRET` so the endpoint rejects public invocations.
-Automated Testnet reproduction uses `/api/cron/reproduce` every 30 minutes (`*/30 * * * *`). It creates and Friendbot-funds an ephemeral Testnet wallet, asks Gemini for schema-validated evidence, submits through the same wallet-authenticated evidence service, sends a confirmed XLM payment, records the transaction on the submission/history path, and only then posts the corresponding Google Form response. The wallet secret is never persisted.
+Automated Testnet reproduction uses cron-job.org to call `/api/cron/reproduce` every 30 minutes (`*/30 * * * *`). It creates and Friendbot-funds an ephemeral Testnet wallet, asks Gemini for schema-validated evidence, submits through the same wallet-authenticated evidence service, sends a confirmed XLM payment, records the transaction on the submission/history path, and only then posts the corresponding Google Form response. The wallet secret is never persisted. The reproduction route is intentionally not registered in `web/vercel.json` to prevent duplicate schedulers.
+
+Configure the cron-job.org job with the deployed HTTPS URL, method `POST`, schedule `*/30 * * * *`, and the custom header `Authorization: Bearer <CRON_SECRET>`. The route returns `202 Accepted` and continues the durable run in the server background, so the scheduler does not wait for Gemini, Testnet confirmation, or Google Forms. Keep the same `CRON_SECRET` in the deployed server environment; cron-job.org stores only the outbound scheduler header.
 
 ## Verification
 
@@ -86,7 +88,7 @@ The script runs gates, deploys both contracts, configures references, regenerate
 | `NEXT_PUBLIC_STELLAR_RPC_URL`, `NEXT_PUBLIC_STELLAR_HORIZON_URL` | optional defaults |
 | `DATABASE_URL`, `DATABASE_AUTH_TOKEN` | remote database; URL required on Vercel |
 | `GITHUB_TOKEN` | optional; required to post comments |
-| `CRON_SECRET` | required on Vercel for authenticated event polling and reproduction cron |
+| `CRON_SECRET` | required on Vercel for authenticated event polling and the cron-job.org reproduction request |
 | `GEMINI_API_KEY` | server-only key required by the automated reproduction cron |
 | `GEMINI_MODEL` | optional; defaults to `gemini-3.1-flash-lite` |
 | `CRON_REPRO_TASK_ID`, `CRON_EVIDENCE_AMOUNT_XLM`, `CRON_PAYMENT_DESTINATION` | optional automated Testnet run settings |
