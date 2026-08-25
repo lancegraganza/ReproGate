@@ -54,10 +54,11 @@ pnpm dev
 ```
 
 Public issue import needs no GitHub login. `GITHUB_TOKEN` is optional and only needed for higher limits or posting. Local development uses `web/.data/reprogate.db`; Vercel requires remote durable libSQL.
-Hosted event polling uses the five-minute Vercel cron in `web/vercel.json`; configure a random `CRON_SECRET` so the endpoint rejects public invocations.
-Automated Testnet reproduction uses cron-job.org to call `/api/cron/reproduce` every 30 minutes (`*/30 * * * *`). It creates and Friendbot-funds an ephemeral Testnet wallet, asks Gemini for schema-validated evidence, submits through the same wallet-authenticated evidence service, sends a confirmed XLM payment, records the transaction on the submission/history path, and only then posts the corresponding Google Form response. The wallet secret is never persisted. The reproduction route is intentionally not registered in `web/vercel.json` to prevent duplicate schedulers.
+All recurring jobs are external cron-job.org jobs; no Vercel cron declarations are shipped, so Hobby deployments do not trigger Vercel's paid-cron validation. Configure a random `CRON_SECRET` so the protected endpoints reject public invocations.
+Hosted event polling uses cron-job.org to call `/api/stellar/sync` every five minutes (`*/5 * * * *`).
+Automated Testnet reproduction uses cron-job.org to call `/api/cron/reproduce` every 30 minutes (`*/30 * * * *`). It creates and Friendbot-funds an ephemeral Testnet wallet, asks Gemini for schema-validated evidence, submits through the same wallet-authenticated evidence service, sends a confirmed XLM payment, records the transaction on the submission/history path, and only then posts the corresponding Google Form response. The wallet secret is never persisted. Neither route is registered as a Vercel cron, preventing duplicate schedulers.
 
-Configure the cron-job.org job with the deployed HTTPS URL, method `POST`, minutes `0` and `30` every hour/day (equivalent to `*/30 * * * *`), and the custom header `Authorization: Bearer <CRON_SECRET>`. The route returns `202 Accepted` and continues the durable run in the server background, so the scheduler does not wait for Gemini, Testnet confirmation, or Google Forms. Keep the same `CRON_SECRET` in the deployed server environment; cron-job.org stores only the outbound scheduler header.
+Configure two cron-job.org jobs with the deployed HTTPS URL, method `POST`, and the custom header `Authorization: Bearer <CRON_SECRET>`: `/api/stellar/sync` every five minutes (`*/5 * * * *`) and `/api/cron/reproduce` at minutes `0` and `30` every hour/day (`*/30 * * * *`). The reproduction route returns `202 Accepted` and continues the durable run in the server background, so the scheduler does not wait for Gemini, Testnet confirmation, or Google Forms. Keep the same `CRON_SECRET` in the deployed server environment; cron-job.org stores only the outbound scheduler header.
 
 ## Verification
 

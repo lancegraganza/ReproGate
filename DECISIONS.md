@@ -46,7 +46,7 @@
 - Gemini output is JSON/schema validated before the existing evidence service is called. Cron evidence starts `PENDING`; only a confirmed Testnet payment can transition it to `CONFIRMED` and eligible evaluation.
 - A real payment hash is attached to the submission and transaction reference before the Google Form POST. Form submission is skipped if generation, validation, wallet funding, transaction submission, or confirmation fails.
 - The Google Form field IDs are configuration values with defaults captured from the currently published form metadata, so a form edit fails visibly rather than silently writing to the wrong fields.
-- cron-job.org is the sole scheduler for reproduction; Vercel only hosts the protected route. This avoids two schedulers creating duplicate Testnet wallets and submissions.
+- cron-job.org is the sole scheduler for recurring workflows; Vercel only hosts the protected endpoints. This avoids two schedulers creating duplicate sync work, Testnet wallets, and submissions.
 - The endpoint acknowledges cron-job.org with `202` and runs the durable workflow in Next's `after()` phase, preventing the external scheduler's short request timeout from interrupting Testnet confirmation.
 
 ## 2026-08-24 — Mainnet disabled in code
