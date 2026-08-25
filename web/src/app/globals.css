@@ -20,7 +20,7 @@ h1,h2,h3,p { margin-top: 0; }
 .muted { color: var(--muted); }
 .eyebrow { margin-bottom: 12px; color: var(--green); font-size: .75rem; font-weight: 800; letter-spacing: .12em; text-transform: uppercase; }
 .brand { display: inline-flex; align-items: center; gap: 9px; font-size: 1rem; font-weight: 800; letter-spacing: -.02em; }
-.brand-mark { display: inline-grid; width: 31px; height: 31px; place-items: center; border-radius: 8px; background: var(--ink); color: #fff; font-family: Consolas,monospace; font-size: .75rem; }
+.brand-logo { display: block; width: 34px; height: 34px; object-fit: contain; }
 .landing-nav { display: flex; min-height: 78px; align-items: center; justify-content: space-between; }
 .landing-nav nav { display: flex; align-items: center; gap: 28px; color: var(--muted); font-size: .9rem; }
 .landing-nav nav a:hover { color: var(--ink); }

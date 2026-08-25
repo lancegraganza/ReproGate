@@ -7,6 +7,7 @@ export const metadata: Metadata = {
   title: { default: "ReproGate", template: "%s · ReproGate" },
   description:
     "Independent GitHub bug reproduction with structured evidence and transparent Stellar Testnet rewards.",
+  icons: { icon: "/reprogatelogo.png" },
 };
 
 export default function RootLayout({ children }: Readonly<{ children: React.ReactNode }>) {

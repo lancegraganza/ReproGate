@@ -1,4 +1,5 @@
 import Link from "next/link";
+import Image from "next/image";
 
 const workflow = [
   ["01", "Import the issue", "A maintainer turns a public GitHub issue into a structured reproduction objective."],
@@ -12,7 +13,7 @@ export default function LandingPage() {
     <main>
       <header className="landing-nav page-width">
         <Link className="brand" href="/">
-          <span className="brand-mark">R/</span> ReproGate
+          <Image className="brand-logo" src="/reprogatelogo.png" alt="" width={36} height={36} priority /> ReproGate
         </Link>
         <nav aria-label="Landing navigation">
           <a href="#workflow">How it works</a>
@@ -92,8 +93,7 @@ export default function LandingPage() {
       </section>
 
       <section className="cta-band"><div className="page-width"><div><p className="eyebrow">A better gate for bug certainty</p><h2>Find the environment that makes the bug real.</h2></div><Link className="button button-inverse" href="/app/tasks">Browse open tasks</Link></div></section>
-      <footer className="landing-footer page-width"><span className="brand"><span className="brand-mark">R/</span> ReproGate</span><span>Built for Stellar Testnet · Mainnet disabled</span></footer>
+      <footer className="landing-footer page-width"><span className="brand"><Image className="brand-logo" src="/reprogatelogo.png" alt="" width={30} height={30} /> ReproGate</span><span>Built for Stellar Testnet · Mainnet disabled</span></footer>
     </main>
   );
 }
-
