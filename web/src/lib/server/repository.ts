@@ -240,7 +240,7 @@ export async function createSubmission(
         notes, minimal_reproduction_url, commit_hash, evidence_hash, normalized_environment_key,
         eligible, suspicious_reason, chain_status, created_at
       ) SELECT ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?
-        FROM tasks WHERE id = ? AND status IN ('OPEN', 'VERIFYING')`,
+        FROM tasks WHERE id = ? AND status IN ('OPEN', 'VERIFYING', 'VERIFIED')`,
       args: [
         id,
         taskId,
@@ -348,7 +348,7 @@ export async function confirmSubmissionTransaction(
   const current = task.submissions.find((submission) => submission.id === submissionId);
   if (!current) throw new Error("Pending evidence submission was not found.");
   if (current.chainStatus === "CONFIRMED") return { submission: current, verification: verifySubmissions(task.submissions, task.threshold, task.deadline) };
-  if (task.status === "FINALIZING" || task.status === "VERIFIED") {
+  if (task.status === "FINALIZING") {
     throw new Error("This task has frozen evidence while finalization is in progress.");
   }
   if (current.chainStatus !== "PENDING") throw new Error("Evidence submission is not awaiting confirmation.");
@@ -397,7 +397,7 @@ export async function confirmSubmissionTransaction(
   }
   const submissions = await listTaskSubmissions(taskId);
   const verification = verifySubmissions(submissions, task.threshold, task.deadline);
-  const nextStatus: TaskStatus = verification.thresholdReached ? "VERIFYING" : "OPEN";
+  const nextStatus: TaskStatus = task.status === "VERIFIED" ? "VERIFIED" : (verification.thresholdReached ? "VERIFYING" : "OPEN");
   const latestTask = await getTask(taskId);
   if (latestTask && latestTask.status !== nextStatus) assertTaskTransition(latestTask.status, nextStatus);
   await getDatabase().execute({

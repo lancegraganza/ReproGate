@@ -87,7 +87,7 @@ export async function releaseCronLock(lockKey: string, token: string): Promise<v
 }
 
 export function currentAutomationWindow(date = new Date()): string {
-  return Math.floor(date.getTime() / (30 * 60_000)).toString();
+  return Math.floor(date.getTime() / 60_000).toString();
 }
 
 export async function getAutomationRun(windowKey: string): Promise<AutomationRun | undefined> {

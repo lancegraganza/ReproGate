@@ -213,11 +213,11 @@ export async function runSettlementRecovery(): Promise<
       return { status: "settled", finalizationHash, runs: outcomes };
     }
 
-    // 2c. Handle already-finalized runs that just need form delivery.
+    // 2c. Handle runs that just need form delivery.
     if (finalizedRuns.length > 0 || formRuns.length > 0) {
-      const fHash = finalizedRuns[0]?.finalizationHash ?? formRuns[0]?.finalizationHash;
-      if (fHash) {
-        const outcomes = await settleHeldForms(taskId, fHash);
+      const fHash = finalizedRuns[0]?.finalizationHash ?? formRuns[0]?.finalizationHash ?? "";
+      const outcomes = await settleHeldForms(taskId, fHash);
+      if (outcomes.length > 0) {
         return { status: "settled_forms", finalizationHash: fHash, runs: outcomes };
       }
     }
