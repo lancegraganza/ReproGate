@@ -144,7 +144,7 @@ Requirements:
 - Make notes useful and written in natural ESL-style technical English.
 - googleFeedback must be natural ESL-style feedback of 1 to 20 words about the form/app experience, not a copy of the evidence.
 - Use a different wording, version detail, and observation emphasis for randomization seed ${seed}; do not mention the seed.
-This is a synthetic testnet simulation. Do not claim that you personally ran code. Only produce the requested evidence fields.`;
+Only produce the requested evidence fields.`;
 
   const response = await fetch(
     `https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(model)}:generateContent`,

@@ -16,13 +16,123 @@ const fields = {
 };
 
 const firstNames = [
-  "Mika", "Aira", "Zia", "Kyla", "Elian", "Sofia", "Nica", "Jiro", "Enzo", "Amara",
-  "Lian", "Yuna", "Andre", "Rhea", "Cian", "Tala", "Mavi", "Sage", "Noel", "Ari",
+  "Miguel",
+  "Paolo",
+  "Gabriel",
+  "Rafael",
+  "Adrian",
+  "Carlo",
+  "Nathan",
+  "Joshua",
+  "Vincent",
+  "Marco",
+  "Daniel",
+  "Enzo",
+  "Andre",
+  "Nico",
+  "Joaquin",
+  "Francis",
+  "Christian",
+  "Angelo",
+  "Jerome",
+  "Patrick",
+  "Anton",
+  "Lance",
+  "Renzo",
+  "Kenneth",
+  "Ryan",
+  "Aaron",
+  "Kevin",
+  "Bianca",
+  "Camille",
+  "Patricia",
+  "Nicole",
+  "Alyssa",
+  "Andrea",
+  "Samantha",
+  "Clarisse",
+  "Danica",
+  "Katrina",
+  "Mikaela",
+  "Trisha",
+  "Nadine",
+  "Cheska",
+  "Janelle",
+  "Maxine",
+  "Deelmeer John",
+  "John Michael",
+  "John Paul",
+  "Mark Anthony",
+  "John Carlo",
+  "James Ryan",
+  "Joshua Miguel",
+  "Karl Vincent",
+  "Mary Grace",
+  "Mary Anne",
+  "Anne Marie",
+  "Nicole Mae",
+  "Alyssa Marie",
+  "Andrea Mae",
 ];
+
 const surnames = [
-  "Dalisay", "Madrigal", "Quimson", "Lacsamana", "Sarmiento", "Ylagan", "Macaraig", "Tanjutco",
-  "Balingit", "Dimapilis", "Esguerra", "Mapili", "Salonga", "Villaseñor", "Aglipay", "Cuyugan",
-  "Lazaro", "Marasigan", "Natividad", "Tiongson",
+  "Dalisay",
+  "Madrigal",
+  "Quimson",
+  "Lacsamana",
+  "Sarmiento",
+  "Ylagan",
+  "Macaraig",
+  "Tanjutco",
+  "Balingit",
+  "Dimapilis",
+  "Esguerra",
+  "Mapili",
+  "Salonga",
+  "Villaseñor",
+  "Aglipay",
+  "Cuyugan",
+  "Lazaro",
+  "Marasigan",
+  "Natividad",
+  "Tiongson",
+  "Abesamis",
+  "Alcantara",
+  "Baluyot",
+  "Cabral",
+  "Dumlao",
+  "Fajardo",
+  "Gatmaitan",
+  "Hilario",
+  "Ilagan",
+  "Jalandoni",
+  "Katigbak",
+  "Legaspi",
+  "Magsino",
+  "Nolasco",
+  "Ocampo",
+  "Panganiban",
+  "Sandejas",
+  "Tolentino",
+  "Umali",
+  "Valmonte",
+  "Zamora",
+  "Agbayani",
+  "Casilag",
+  "De Vera",
+  "Guinto",
+  "Lapid",
+  "Manalili",
+  "Nepomuceno",
+  "Ordoñez",
+  "Punzalan",
+  "Recto",
+  "Sison",
+  "Tuazon",
+  "Vergara",
+  "Almeda",
+  "Montemayor",
+  "Villareal",
 ];
 
 export interface GoogleFormPayload {
@@ -46,12 +156,18 @@ function boundedFeedback(generated: string): string {
   return candidate.split(/\s+/).slice(0, 20).join(" ") || "Good app";
 }
 
-export function createGoogleFormPayload(wallet: string, generated: GeneratedEvidence): GoogleFormPayload {
+export function createGoogleFormPayload(
+  wallet: string,
+  generated: GeneratedEvidence,
+): GoogleFormPayload {
   const firstName = firstNames[randomInt(firstNames.length)] ?? "Mika";
   const surname = surnames[randomInt(surnames.length)] ?? "Dalisay";
   const fullName = `${firstName} ${surname}`;
   const year = 2000 + randomInt(7);
-  const emailName = `${firstName}.${surname}`.toLowerCase().normalize("NFKD").replace(/[^a-z0-9.]/g, "");
+  const emailName = `${firstName}.${surname}`
+    .toLowerCase()
+    .normalize("NFKD")
+    .replace(/[^a-z0-9.]/g, "");
   return {
     fullName,
     email: `${emailName}${year}@gmail.com`,
@@ -61,7 +177,9 @@ export function createGoogleFormPayload(wallet: string, generated: GeneratedEvid
   };
 }
 
-export async function submitGoogleForm(payload: GoogleFormPayload): Promise<void> {
+export async function submitGoogleForm(
+  payload: GoogleFormPayload,
+): Promise<void> {
   const body = new URLSearchParams({
     [fields.fullName]: payload.fullName,
     [fields.email]: payload.email,
@@ -77,7 +195,10 @@ export async function submitGoogleForm(payload: GoogleFormPayload): Promise<void
     signal: AbortSignal.timeout(30_000),
   });
   const location = response.headers.get("location") ?? response.url;
-  if (![200, 301, 302, 303].includes(response.status) || !location.includes("/formResponse")) {
+  if (
+    ![200, 301, 302, 303].includes(response.status) ||
+    !location.includes("/formResponse")
+  ) {
     throw new Error(`Google Form submission failed (${response.status}).`);
   }
 }
