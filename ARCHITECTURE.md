@@ -51,6 +51,8 @@ UI transactions expose simulate → await signature → submit → pending → c
 
 `GET|POST /api/stellar/sync` polls both contracts with a durable cursor behind `CRON_SECRET`; Vercel invokes it every five minutes. Event IDs are inserted idempotently, then full typed contract state is compared with off-chain task metadata before any lifecycle transition. Confirmed transaction callbacks additionally require the expected contract event, task hash, transaction hash, and ledger.
 
+`GET|POST /api/cron/reproduce` is a separate protected Vercel cron scheduled every 30 minutes. It acquires a distributed task lock and records an idempotent window run, creates an ephemeral Friendbot-funded Testnet wallet, generates schema-validated synthetic evidence through Gemini, submits it through the same wallet challenge and repository service as the browser evidence form, inserts it as chain-pending, sends a real Testnet XLM payment, waits for Horizon confirmation, then marks the evidence confirmed and posts the matching Google Form payload. Pending form posts are recoverable on later windows. Gemini keys and wallet secret keys remain server-only; only the public wallet and confirmed hash are persisted.
+
 ## Security and promotion
 
 - No seed phrase, secret key, or production credential is accepted or stored.

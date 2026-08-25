@@ -125,9 +125,39 @@ export async function initializeDatabase(): Promise<void> {
             updated_at TEXT NOT NULL,
             PRIMARY KEY (rate_key, minute_bucket)
           )`,
+          `CREATE TABLE IF NOT EXISTS cron_locks (
+            lock_key TEXT PRIMARY KEY,
+            token TEXT NOT NULL,
+            expires_at TEXT NOT NULL,
+            updated_at TEXT NOT NULL
+          )`,
+          `CREATE TABLE IF NOT EXISTS automated_reproduction_runs (
+            window_key TEXT PRIMARY KEY,
+            task_id TEXT NOT NULL REFERENCES tasks(id) ON DELETE CASCADE,
+            status TEXT NOT NULL,
+            wallet TEXT,
+            submission_id TEXT,
+            transaction_hash TEXT,
+            form_payload_json TEXT,
+            error TEXT,
+            created_at TEXT NOT NULL,
+            updated_at TEXT NOT NULL,
+            form_submitted_at TEXT
+          )`,
         ],
         "write",
       );
+      for (const statement of [
+        "ALTER TABLE submissions ADD COLUMN chain_status TEXT NOT NULL DEFAULT 'CONFIRMED'",
+        "ALTER TABLE submissions ADD COLUMN transaction_hash TEXT",
+        "ALTER TABLE submissions ADD COLUMN transaction_explorer_url TEXT",
+      ]) {
+        try {
+          await db.execute(statement);
+        } catch (error) {
+          if (!String(error).toLowerCase().includes("duplicate column name")) throw error;
+        }
+      }
       try {
         await db.execute("ALTER TABLE report_publications ADD COLUMN attempt_id TEXT");
       } catch (error) {

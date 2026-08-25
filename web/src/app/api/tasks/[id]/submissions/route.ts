@@ -1,6 +1,5 @@
 import { errorResponse } from "@/lib/server/http";
-import { createSubmission } from "@/lib/server/repository";
-import { verifyAndConsumeWalletAuthorization } from "@/lib/server/wallet-auth";
+import { submitEvidence } from "@/lib/server/submissions";
 import { createSubmissionRequestSchema } from "@/lib/validation/schemas";
 
 export async function POST(
@@ -11,13 +10,7 @@ export async function POST(
     const { id } = await context.params;
     const requestInput = createSubmissionRequestSchema.parse(await request.json());
     const { authorization, ...input } = requestInput;
-    await verifyAndConsumeWalletAuthorization(
-      input.wallet,
-      "SUBMIT_EVIDENCE",
-      authorization,
-      id,
-    );
-    const result = await createSubmission(id, input);
+    const result = await submitEvidence(id, input, authorization);
     return Response.json(result, { status: 201 });
   } catch (error) {
     return errorResponse(error);

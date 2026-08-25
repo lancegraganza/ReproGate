@@ -29,4 +29,5 @@
 - [x] GitHub Actions and public evidence
 - [ ] Vercel — requires authenticated Vercel and durable libSQL credentials
 - [ ] Live GitHub comment — requires repository-scoped `GITHUB_TOKEN`; preview verified
-
+- [x] 30-minute Gemini/Testnet/Google Form reproduction cron implementation
+- [ ] Live automated cron run — requires `GEMINI_API_KEY`, `CRON_SECRET`, and production durable database credentials

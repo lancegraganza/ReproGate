@@ -10,6 +10,8 @@ vi.mock("server-only", () => ({}));
 import { getDatabase } from "./database";
 import {
   claimGitHubReport,
+  attachSubmissionTransaction,
+  confirmSubmissionTransaction,
   createSubmission,
   createTask,
   getTask,
@@ -86,5 +88,37 @@ describe.sequential("repository concurrency safeguards", () => {
       await expect(renewGitHubReportClaim(taskId, original.attemptId)).rejects.toThrow("lease was lost");
       await expect(renewGitHubReportClaim(taskId, reclaimed.attemptId)).resolves.toBeUndefined();
     }
+  });
+
+  it("keeps cron evidence pending until its Testnet transaction is attached and confirmed", async () => {
+    const pending = await createSubmission(taskId, {
+      wallet: Keypair.random().publicKey(),
+      verdict: "REPRODUCED",
+      environment: {
+        operatingSystem: "Android 13",
+        runtime: "DeepSeek App",
+        runtimeVersion: "2.2.2",
+        packageManager: "mobile",
+        packageManagerVersion: "2.2.2",
+        dependencies: { model: "DeepSeek-LLM" },
+      },
+      reproductionSteps: "Open a clean conversation, disable web search, send a short prompt, and inspect the final rendered response.",
+      relevantLogs: "Observed the closing output tag rendered at the end of the response.",
+      notes: "Pending cron simulation evidence.",
+      minimalReproductionUrl: "",
+      commitHash: "",
+    }, { chainStatus: "PENDING" });
+    expect(pending.submission.chainStatus).toBe("PENDING");
+    expect(pending.submission.eligible).toBe(false);
+    const hash = "3".repeat(64);
+    await attachSubmissionTransaction(pending.submission.id, taskId, hash, `https://stellar.expert/explorer/testnet/tx/${hash}`);
+    const confirmed = await confirmSubmissionTransaction(
+      pending.submission.id,
+      taskId,
+      hash,
+      `https://stellar.expert/explorer/testnet/tx/${hash}`,
+    );
+    expect(confirmed.submission.chainStatus).toBe("CONFIRMED");
+    expect(confirmed.submission.transactionHash).toBe(hash);
   });
 });

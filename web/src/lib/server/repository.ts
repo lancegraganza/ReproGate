@@ -78,6 +78,9 @@ function parseSubmission(row: Row): Submission {
     normalizedEnvironmentKey: text(row, "normalized_environment_key"),
     eligible: Number(row.eligible) === 1,
     suspiciousReason: optionalText(row, "suspicious_reason"),
+    chainStatus: (optionalText(row, "chain_status") ?? "CONFIRMED") as Submission["chainStatus"],
+    transactionHash: optionalText(row, "transaction_hash"),
+    transactionExplorerUrl: optionalText(row, "transaction_explorer_url"),
     createdAt: text(row, "created_at"),
   };
 }
@@ -87,6 +90,10 @@ export class DuplicateSubmissionError extends Error {
     super("This wallet already submitted independent evidence for this task.");
   }
 }
+
+export type SubmissionChainStatus = "PENDING" | "CONFIRMED";
+
+const PENDING_CHAIN_REASON = "Awaiting Stellar Testnet transaction confirmation.";
 
 export async function createTask(input: CreateTaskInput, issue: GitHubIssue): Promise<ReproTask> {
   await initializeDatabase();
@@ -190,6 +197,7 @@ export async function listWalletSubmissions(wallet: string): Promise<Submission[
 export async function createSubmission(
   taskId: string,
   input: CreateSubmissionInput,
+  options: { chainStatus?: SubmissionChainStatus } = {},
 ): Promise<{ submission: Submission; verification: VerificationResult }> {
   const task = await getTask(taskId);
   if (!task) throw new Error("Task not found.");
@@ -222,13 +230,16 @@ export async function createSubmission(
 
   const id = randomUUID();
   const createdAt = new Date().toISOString();
+  const chainStatus = options.chainStatus ?? "CONFIRMED";
+  const eligible = !suspiciousReason && chainStatus === "CONFIRMED";
+  const storedReason = suspiciousReason ?? (chainStatus === "PENDING" ? PENDING_CHAIN_REASON : undefined);
   const insertSubmission = async (eligible: boolean, reason?: string) =>
     getDatabase().execute({
       sql: `INSERT INTO submissions (
         id, task_id, wallet, verdict, environment_json, reproduction_steps, relevant_logs,
         notes, minimal_reproduction_url, commit_hash, evidence_hash, normalized_environment_key,
-        eligible, suspicious_reason, created_at
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        eligible, suspicious_reason, chain_status, created_at
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       args: [
         id,
         taskId,
@@ -244,11 +255,12 @@ export async function createSubmission(
         normalizedEnvironmentKey,
         eligible ? 1 : 0,
         reason ?? null,
+        chainStatus,
         createdAt,
       ],
     });
   try {
-    await insertSubmission(!suspiciousReason, suspiciousReason);
+    await insertSubmission(eligible, storedReason);
   } catch (error) {
     const message = error instanceof Error ? error.message.toLowerCase() : "";
     if (message.includes("unique") || message.includes("constraint")) {
@@ -257,7 +269,9 @@ export async function createSubmission(
         args: [taskId, input.wallet],
       });
       if (duplicateWallet.rows.length) throw new DuplicateSubmissionError();
-      await insertSubmission(false, "Evidence duplicates an existing eligible submission.");
+      await insertSubmission(false, chainStatus === "PENDING"
+        ? PENDING_CHAIN_REASON
+        : "Evidence duplicates an existing eligible submission.");
     } else {
       throw error;
     }
@@ -276,6 +290,119 @@ export async function createSubmission(
     submission: submissions.find((submission) => submission.id === id)!,
     verification,
   };
+}
+
+export async function attachSubmissionTransaction(
+  submissionId: string,
+  taskId: string,
+  hash: string,
+  explorerUrl: string,
+): Promise<void> {
+  await initializeDatabase();
+  const now = new Date().toISOString();
+  const result = await getDatabase().batch(
+    [
+      {
+        sql: `UPDATE submissions SET transaction_hash = ?, transaction_explorer_url = ?
+          WHERE id = ? AND task_id = ? AND chain_status = 'PENDING'`,
+        args: [hash, explorerUrl, submissionId, taskId],
+      },
+      {
+        sql: `INSERT INTO transaction_references
+          (hash, task_id, kind, status, explorer_url, created_at, confirmed_at)
+          VALUES (?, ?, 'EVIDENCE', 'PENDING', ?, ?, NULL)
+          ON CONFLICT(hash) DO UPDATE SET task_id = excluded.task_id,
+            status = 'PENDING', explorer_url = excluded.explorer_url`,
+        args: [hash, taskId, explorerUrl, now],
+      },
+    ],
+    "write",
+  );
+  if (Number(result[0]?.rowsAffected ?? 0) !== 1) {
+    const existing = await getDatabase().execute({
+      sql: "SELECT transaction_hash FROM submissions WHERE id = ? AND task_id = ?",
+      args: [submissionId, taskId],
+    });
+    if (String(existing.rows[0]?.transaction_hash ?? "") === hash) return;
+    throw new Error("Pending evidence submission was not found.");
+  }
+}
+
+export async function confirmSubmissionTransaction(
+  submissionId: string,
+  taskId: string,
+  hash: string,
+  explorerUrl: string,
+): Promise<{ submission: Submission; verification: VerificationResult }> {
+  await initializeDatabase();
+  const task = await getTask(taskId);
+  if (!task) throw new Error("Task not found.");
+  const current = task.submissions.find((submission) => submission.id === submissionId);
+  if (!current) throw new Error("Pending evidence submission was not found.");
+  if (current.chainStatus === "CONFIRMED") return { submission: current, verification: verifySubmissions(task.submissions, task.threshold, task.deadline) };
+  if (current.chainStatus !== "PENDING") throw new Error("Evidence submission is not awaiting confirmation.");
+
+  const candidate = {
+    evidenceHash: current.evidenceHash,
+    reproductionSteps: current.reproductionSteps,
+    relevantLogs: current.relevantLogs,
+    minimalReproductionUrl: current.minimalReproductionUrl,
+    normalizedEnvironmentKey: current.normalizedEnvironmentKey,
+  };
+  const existing = task.submissions.filter((submission) => submission.id !== submissionId);
+  const suspiciousReason = findSuspiciousSimilarity(candidate, existing);
+  const now = new Date().toISOString();
+  const eligible = !suspiciousReason;
+  try {
+    const results = await getDatabase().batch(
+      [
+        {
+          sql: `UPDATE submissions SET chain_status = 'CONFIRMED', eligible = ?, suspicious_reason = ?,
+            transaction_hash = ?, transaction_explorer_url = ?
+            WHERE id = ? AND task_id = ? AND chain_status = 'PENDING'`,
+          args: [eligible ? 1 : 0, suspiciousReason ?? null, hash, explorerUrl, submissionId, taskId],
+        },
+        {
+          sql: `UPDATE transaction_references SET status = 'CONFIRMED', confirmed_at = ?
+            WHERE hash = ? AND task_id = ?`,
+          args: [now, hash, taskId],
+        },
+      ],
+      "write",
+    );
+    if (Number(results[0]?.rowsAffected ?? 0) !== 1) {
+      throw new Error("Evidence submission was already finalized or is no longer pending.");
+    }
+  } catch (error) {
+    const message = error instanceof Error ? error.message.toLowerCase() : "";
+    if (!message.includes("unique") && !message.includes("constraint")) throw error;
+    await getDatabase().execute({
+      sql: `UPDATE submissions SET chain_status = 'CONFIRMED', eligible = 0,
+        suspicious_reason = 'Evidence duplicates an existing eligible submission.',
+        transaction_hash = ?, transaction_explorer_url = ?
+        WHERE id = ? AND task_id = ? AND chain_status = 'PENDING'`,
+      args: [hash, explorerUrl, submissionId, taskId],
+    });
+  }
+  const submissions = await listTaskSubmissions(taskId);
+  const verification = verifySubmissions(submissions, task.threshold, task.deadline);
+  const nextStatus: TaskStatus = verification.thresholdReached ? "VERIFYING" : "OPEN";
+  const latestTask = await getTask(taskId);
+  if (latestTask && latestTask.status !== nextStatus) assertTaskTransition(latestTask.status, nextStatus);
+  await getDatabase().execute({
+    sql: "UPDATE tasks SET verification_json = ?, status = ?, updated_at = ? WHERE id = ?",
+    args: [JSON.stringify(verification), nextStatus, now, taskId],
+  });
+  return { submission: submissions.find((submission) => submission.id === submissionId)!, verification };
+}
+
+export async function failSubmissionTransaction(submissionId: string, taskId: string, reason: string): Promise<void> {
+  await initializeDatabase();
+  await getDatabase().execute({
+    sql: `UPDATE submissions SET chain_status = 'FAILED', eligible = 0, suspicious_reason = ?
+      WHERE id = ? AND task_id = ? AND chain_status = 'PENDING' AND transaction_hash IS NULL`,
+    args: [reason.slice(0, 500), submissionId, taskId],
+  });
 }
 
 export async function recordTaskTransaction(

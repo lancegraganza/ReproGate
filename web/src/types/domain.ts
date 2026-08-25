@@ -94,6 +94,9 @@ export interface Submission {
   normalizedEnvironmentKey: string;
   eligible: boolean;
   suspiciousReason?: string;
+  chainStatus?: "PENDING" | "CONFIRMED" | "FAILED";
+  transactionHash?: string;
+  transactionExplorerUrl?: string;
   createdAt: string;
 }
 

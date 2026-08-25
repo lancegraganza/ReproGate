@@ -40,6 +40,13 @@
 - GitHub reports use a database publication lease plus a stable hidden comment marker. A stale lease is reclaimable and retries discover an already-posted comment before creating another.
 - Wallet challenges contain only a bump-sequence operation, expire after five minutes, are single-use, and use shared libSQL rate counters scoped to caller and caller-wallet.
 
+## 2026-08-25 — Automated Testnet reproduction is chain-gated
+
+- The 30-minute cron uses a new ephemeral Friendbot-funded Testnet wallet per window and never persists its secret key.
+- Gemini output is JSON/schema validated before the existing evidence service is called. Cron evidence starts `PENDING`; only a confirmed Testnet payment can transition it to `CONFIRMED` and eligible evaluation.
+- A real payment hash is attached to the submission and transaction reference before the Google Form POST. Form submission is skipped if generation, validation, wallet funding, transaction submission, or confirmation fails.
+- The Google Form field IDs are configuration values with defaults captured from the currently published form metadata, so a form edit fails visibly rather than silently writing to the wrong fields.
+
 ## 2026-08-24 — Mainnet disabled in code
 
 - Only `local` and `testnet` are accepted. `mainnet` and `public` throw.
