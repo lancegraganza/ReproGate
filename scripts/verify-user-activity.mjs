@@ -279,21 +279,16 @@ async function verifyTransactions(candidates, horizonUrl) {
   return { successful, rejected };
 }
 
-function serializeWallets(walletReport, successfulHashSet) {
-  return [...walletReport.wallets.values()]
-    .sort((left, right) => left.address.localeCompare(right.address))
-    .map((wallet) => {
-      const hashes = [...wallet.confirmedEvidenceTransactionHashes]
-        .filter((hash) => successfulHashSet.has(hash))
-        .sort();
-      return {
-        address: wallet.address,
-        explorerUrl: wallet.explorerUrl,
-        sources: [...wallet.sources].sort(),
-        successfulEvidenceTransactionCount: hashes.length,
-        successfulEvidenceTransactionHashes: hashes,
-      };
-    });
+function walletAddresses(walletReport) {
+  return [...walletReport.wallets.keys()].sort();
+}
+
+function countTransactingWallets(walletReport, successfulHashSet) {
+  return [...walletReport.wallets.values()].filter((wallet) =>
+    [...wallet.confirmedEvidenceTransactionHashes].some((hash) =>
+      successfulHashSet.has(hash),
+    ),
+  ).length;
 }
 
 async function main() {
@@ -322,16 +317,17 @@ async function main() {
 
   try {
     const tables = await existingTables(db);
-    const { walletReport, transactionCandidates, sourceCounts } =
+    const { walletReport, transactionCandidates } =
       await collectDatabaseEvidence(db, tables);
     const { successful, rejected } = await verifyTransactions(
       [...transactionCandidates.values()],
       horizonUrl,
     );
     const successfulHashSet = new Set(successful.map((transaction) => transaction.hash));
-    const wallets = serializeWallets(walletReport, successfulHashSet);
-    const transactingWallets = wallets.filter(
-      (wallet) => wallet.successfulEvidenceTransactionCount > 0,
+    const uniqueWalletAddresses = walletAddresses(walletReport);
+    const usersWithSuccessfulEvidenceTransactions = countTransactingWallets(
+      walletReport,
+      successfulHashSet,
     );
     const transactionKinds = Object.fromEntries(
       [...new Set(successful.map((transaction) => transaction.kind))]
@@ -345,33 +341,25 @@ async function main() {
     const report = {
       generatedAt: new Date().toISOString(),
       network: "Stellar Testnet",
-      sources: {
-        database: databaseUrl.startsWith("file:") ? "local SQLite" : "remote libSQL",
-        stellar: horizonUrl,
-        databaseRecords: sourceCounts,
-      },
-      definitions: {
-        totalUsers:
-          "Unique valid Stellar wallet addresses recorded by ReproGate tasks, submissions, wallet challenges, or automation runs.",
-        totalUniqueWallets: "Same deduplicated public-address set as totalUsers.",
-        usersWithSuccessfulEvidenceTransactions:
-          "Unique submission wallets whose confirmed evidence-payment hash is independently reported successful by Horizon.",
-        totalSuccessfulReproGateTransactions:
-          "Distinct CONFIRMED transaction_references that Horizon independently reports as successful on Stellar Testnet.",
-      },
+      note: "Wallet and transaction counts are verified from ReproGate's database and Stellar Testnet Horizon. The cohort is automated Testnet simulation, not verified distinct humans.",
       totals: {
-        totalUsers: wallets.length,
-        totalUniqueWallets: wallets.length,
-        usersWithSuccessfulEvidenceTransactions: transactingWallets.length,
+        totalUsers: uniqueWalletAddresses.length,
+        totalUniqueWallets: uniqueWalletAddresses.length,
+        usersWithSuccessfulEvidenceTransactions,
         totalSuccessfulReproGateTransactions: successful.length,
         successfulTransactionsByKind: transactionKinds,
         databaseConfirmedTransactionsRejectedByHorizon: rejected.length,
       },
-      uniqueWalletAddresses: wallets.map((wallet) => wallet.address),
-      wallets,
+      uniqueWalletAddresses,
       successfulTransactionHashes: successful.map((transaction) => transaction.hash),
-      successfulTransactions: successful,
-      rejectedTransactions: rejected,
+      explorer: {
+        walletUrlTemplate: `${EXPLORER_ACCOUNT_BASE}/{walletAddress}`,
+        transactionUrlTemplate: `${EXPLORER_TX_BASE}/{transactionHash}`,
+        finalizationUrl:
+          successful.find((transaction) => transaction.kind === "FINALIZE")
+            ?.explorerUrl ?? null,
+      },
+      rejectedTransactionHashes: rejected.map((transaction) => transaction.hash),
     };
 
     mkdirSync(dirname(outputPath), { recursive: true });

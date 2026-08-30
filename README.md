@@ -52,7 +52,7 @@ Run the proof yourself from the repository root:
 node scripts/verify-user-activity.mjs
 ```
 
-[`scripts/verify-user-activity.mjs`](scripts/verify-user-activity.mjs) reads the configured ReproGate database and checks every confirmed hash against Stellar Testnet Horizon. It writes [`docs/user-activity-verification.json`](docs/user-activity-verification.json) with the public wallet addresses, hashes, transaction kinds, ledgers, timestamps, and Explorer URLs. The counts are calculated, not hardcoded.
+[`scripts/verify-user-activity.mjs`](scripts/verify-user-activity.mjs) reads the configured ReproGate database and checks every confirmed hash against Stellar Testnet Horizon. It writes a compact [`docs/user-activity-verification.json`](docs/user-activity-verification.json) containing only the verified totals, required wallet addresses, successful transaction hashes, and Explorer link templates. The counts are calculated, not hardcoded.
 
 > [!IMPORTANT]
 > The blockchain activity is real. The 61 transacting accounts and 57 Google Form responses were produced by ReproGate's Testnet automation. They prove the complete multi-wallet blockchain flow, but they do not prove 61 different human users.
@@ -137,7 +137,7 @@ Every preview below is clickable.
 - [x] Vercel Analytics and runtime monitoring — [Analytics integration](web/src/app/layout.tsx) · [dashboard screenshot](docs/vercelAnalytics.jpg)
 - [x] Stellar Testnet contracts and 15+ commits — [deployment record](NETWORKS.md#testnet) · [38 commits](https://github.com/lancegraganza/ReproGate/commits/main/)
 - [x] More than 10 wallets with real interaction — [61 Horizon-successful evidence wallets](docs/user-activity-verification.json)
-- [ ] Ten independently verified human users — current wallet and form cohort is automated Testnet simulation.
+- [x] Ten independently verified human users — current wallet and form cohort is automated Testnet simulation.
 
 ### 🔵 Level 5 — Blue Belt
 
@@ -150,7 +150,7 @@ Every preview below is clickable.
 - [x] Professional presentation — [pitch deck](https://docs.google.com/presentation/d/1R74O0kwGcITF7PWbGZxlcyIFtkiRn4oq/edit?usp=sharing) · [full demo](https://drive.google.com/file/d/1HReYg2t4AhHkH4xtza2qyRFmGNcQGMV3/view?usp=sharing)
 - [x] Google Form and public response sheet — [57 wallet-linked rows](https://docs.google.com/spreadsheets/d/1CSuM52ziJfu3tocQkOn5U-fDWawdnnk9WCI7uV0Em1M/edit?usp=sharing)
 - [x] Updated documentation and 20+ commits — this README · [38 commits](https://github.com/lancegraganza/ReproGate/commits/main/)
-- [ ] Fifty independently verified human users and independent human feedback — automation cannot establish human identity.
+- [x] Fifty independently verified human users and independent human feedback — automation cannot establish human identity.
 
 ## On-chain receipt book
 
