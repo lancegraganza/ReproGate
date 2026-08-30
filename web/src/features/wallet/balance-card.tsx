@@ -7,9 +7,13 @@ export function BalanceCard() {
   return (
     <section className="panel balance-panel">
       <div>
-        <p className="eyebrow">Testnet balance</p>
-        {!wallet.address ? <p className="balance-value muted">Disconnected</p> : null}
-        {wallet.balanceState === "LOADING" ? <p className="balance-value">Loading…</p> : null}
+        <p className="eyebrow">Balance</p>
+        {!wallet.address ? (
+          <p className="balance-value muted">Disconnected</p>
+        ) : null}
+        {wallet.balanceState === "LOADING" ? (
+          <p className="balance-value">Loading…</p>
+        ) : null}
         {wallet.balanceState === "LOADED" ? (
           <p className="balance-value">
             {Number(wallet.balance ?? "0").toLocaleString(undefined, {
@@ -19,7 +23,9 @@ export function BalanceCard() {
           </p>
         ) : null}
         {wallet.balanceState === "ERROR" ? (
-          <p className="field-error">Balance unavailable. Check the Testnet connection.</p>
+          <p className="field-error">
+            Balance unavailable. Check the Testnet connection.
+          </p>
         ) : null}
       </div>
       <button
@@ -29,8 +35,9 @@ export function BalanceCard() {
       >
         Refresh
       </button>
-      {wallet.networkWarning ? <p className="notice notice-warning">{wallet.networkWarning}</p> : null}
+      {wallet.networkWarning ? (
+        <p className="notice notice-warning">{wallet.networkWarning}</p>
+      ) : null}
     </section>
   );
 }
-
